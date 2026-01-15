@@ -16,7 +16,9 @@
       "Bash(curl:*)",
       "Bash(pip install:*)",
       "Bash(/opt/anaconda3/bin/pip install:*)",
-      "Bash(python manage.py check:*)"
+      "Bash(python manage.py check:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(docker-compose down:*)"
     ]
   }
 }
