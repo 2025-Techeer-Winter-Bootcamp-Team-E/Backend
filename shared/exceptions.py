@@ -1,0 +1,147 @@
+"""
+Shared exceptions and custom exception handler.
+Consolidates all domain exceptions for the application.
+"""
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import exception_handler
+
+
+# === Base Exceptions ===
+
+class AppException(Exception):
+    """Base exception for application."""
+
+    def __init__(self, message: str, code: str = None):
+        self.message = message
+        self.code = code or self.__class__.__name__
+        super().__init__(self.message)
+
+
+class NotFoundError(AppException):
+    """Entity not found."""
+
+    def __init__(self, entity_name: str, entity_id: str):
+        super().__init__(
+            message=f"{entity_name} with id '{entity_id}' not found",
+            code="ENTITY_NOT_FOUND"
+        )
+        self.entity_name = entity_name
+        self.entity_id = entity_id
+
+
+class ValidationError(AppException):
+    """Validation failed."""
+
+    def __init__(self, message: str, field: str = None):
+        super().__init__(message=message, code="VALIDATION_ERROR")
+        self.field = field
+
+
+class BusinessRuleError(AppException):
+    """Business rule violated."""
+
+    def __init__(self, message: str, rule: str = None):
+        super().__init__(message=message, code="BUSINESS_RULE_VIOLATION")
+        self.rule = rule
+
+
+class InsufficientStockError(AppException):
+    """Stock insufficient."""
+
+    def __init__(self, product_id: str, requested: int, available: int):
+        super().__init__(
+            message=f"Insufficient stock for product '{product_id}': requested {requested}, available {available}",
+            code="INSUFFICIENT_STOCK"
+        )
+        self.product_id = product_id
+        self.requested = requested
+        self.available = available
+
+
+class InvalidOperationError(AppException):
+    """Raised when an operation is invalid for the current state."""
+
+    def __init__(self, message: str, operation: str = None, state: str = None):
+        super().__init__(message=message, code="INVALID_OPERATION")
+        self.operation = operation
+        self.state = state
+
+
+# === Exception Handler ===
+
+def custom_exception_handler(exc, context):
+    """Handle custom application exceptions."""
+    # Call REST framework's default exception handler first
+    response = exception_handler(exc, context)
+
+    # Handle NotFoundError
+    if isinstance(exc, NotFoundError):
+        return Response(
+            {
+                'error': exc.message,
+                'code': exc.code,
+                'entity': exc.entity_name,
+                'entity_id': exc.entity_id,
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Handle ValidationError
+    if isinstance(exc, ValidationError):
+        return Response(
+            {
+                'error': exc.message,
+                'code': exc.code,
+                'field': exc.field,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Handle InsufficientStockError
+    if isinstance(exc, InsufficientStockError):
+        return Response(
+            {
+                'error': exc.message,
+                'code': exc.code,
+                'product_id': exc.product_id,
+                'requested': exc.requested,
+                'available': exc.available,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Handle BusinessRuleError
+    if isinstance(exc, BusinessRuleError):
+        return Response(
+            {
+                'error': exc.message,
+                'code': exc.code,
+                'rule': exc.rule,
+            },
+            status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+    # Handle InvalidOperationError
+    if isinstance(exc, InvalidOperationError):
+        return Response(
+            {
+                'error': exc.message,
+                'code': exc.code,
+                'operation': exc.operation,
+                'state': exc.state,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    # Handle generic AppException
+    if isinstance(exc, AppException):
+        return Response(
+            {
+                'error': exc.message,
+                'code': exc.code,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return response

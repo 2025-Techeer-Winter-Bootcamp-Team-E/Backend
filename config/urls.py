@@ -24,12 +24,15 @@ urlpatterns = [
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 
     # API v1
-    path('api/v1/users/', include('apps.users.interfaces.api.urls')),
-    path('api/v1/products/', include('apps.products.interfaces.api.urls')),
-    path('api/v1/orders/', include('apps.orders.interfaces.api.urls')),
+    path('api/v1/users/', include('modules.users.urls')),
+    path('api/v1/products/', include('modules.products.urls')),
+    path('api/v1/orders/', include('modules.orders.urls')),
+    path('api/v1/categories/', include('modules.categories.urls')),
+    path('api/v1/search/', include('modules.search.urls')),
+    path('api/v1/predictions/', include('modules.price_prediction.urls')),
 
     # Health check
-    path('api/v1/health/', include('shared.interfaces.health_urls')),
+    path('api/v1/health/', include('shared.health.urls')),
 ]
 
 # Debug toolbar in development

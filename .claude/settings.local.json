@@ -2,7 +2,21 @@
   "permissions": {
     "allow": [
       "Bash(find:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(python manage.py makemigrations:*)",
+      "Bash(docker-compose exec:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose build:*)",
+      "Bash(chmod:*)",
+      "Bash(docker-compose restart:*)",
+      "Bash(curl:*)",
+      "Bash(pip install:*)",
+      "Bash(/opt/anaconda3/bin/pip install:*)",
+      "Bash(python manage.py check:*)"
     ]
   }
 }

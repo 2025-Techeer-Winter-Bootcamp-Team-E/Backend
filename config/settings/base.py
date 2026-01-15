@@ -47,9 +47,12 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
-    'apps.users',
-    'apps.products',
-    'apps.orders',
+    'modules.users',
+    'modules.products',
+    'modules.orders',
+    'modules.categories',
+    'modules.search',
+    'modules.price_prediction',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -162,7 +165,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
-    'EXCEPTION_HANDLER': 'shared.interfaces.exception_handlers.custom_exception_handler',
+    'EXCEPTION_HANDLER': 'shared.exceptions.custom_exception_handler',
 }
 
 # JWT Settings
@@ -197,6 +200,9 @@ SPECTACULAR_SETTINGS = {
         {'name': 'Products', 'description': 'Product management endpoints'},
         {'name': 'Orders', 'description': 'Order management endpoints'},
         {'name': 'Cart', 'description': 'Shopping cart endpoints'},
+        {'name': 'Categories', 'description': 'Category management endpoints'},
+        {'name': 'Search', 'description': 'Search endpoints'},
+        {'name': 'Price Prediction', 'description': 'Price prediction endpoints'},
     ],
 }
 
@@ -222,9 +228,12 @@ CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
 # Celery Queue Routes
 CELERY_TASK_ROUTES = {
-    'apps.products.infrastructure.tasks.*': {'queue': 'embeddings'},
-    'apps.orders.infrastructure.tasks.*': {'queue': 'orders'},
-    'apps.users.infrastructure.tasks.*': {'queue': 'emails'},
+    'modules.products.tasks.*': {'queue': 'embeddings'},
+    'modules.orders.tasks.*': {'queue': 'orders'},
+    'modules.users.tasks.*': {'queue': 'emails'},
+    'modules.search.tasks.*': {'queue': 'default'},
+    'modules.price_prediction.tasks.*': {'queue': 'predictions'},
+    'modules.categories.tasks.*': {'queue': 'default'},
 }
 
 # AWS S3 / MinIO Settings
@@ -277,7 +286,7 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
-        'apps': {
+        'modules': {
             'handlers': ['console'],
             'level': 'DEBUG',
             'propagate': False,

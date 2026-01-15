@@ -32,19 +32,18 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY . .
 
+# Make entrypoint executable (before creating non-root user)
+RUN chmod +x /app/scripts/entrypoint.sh
+
+# Create directories for static and media files
+RUN mkdir -p /app/staticfiles /app/media
+
 # Create non-root user
 RUN addgroup --system --gid 1001 django \
     && adduser --system --uid 1001 --gid 1001 django \
     && chown -R django:django /app
 
-# Create directories for static and media files
-RUN mkdir -p /app/staticfiles /app/media \
-    && chown -R django:django /app/staticfiles /app/media
-
 USER django
-
-# Make entrypoint executable
-RUN chmod +x /app/scripts/entrypoint.sh
 
 EXPOSE 8000
 
