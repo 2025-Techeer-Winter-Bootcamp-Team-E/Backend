@@ -245,6 +245,11 @@ class ReviewModel(models.Model):
         blank=True,
         verbose_name='평점'
     )
+    review_images = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='리뷰 이미지 URL 목록'
+    )
     ai_review_summary = models.JSONField(
         null=True,
         blank=True,
