@@ -37,8 +37,10 @@ class UserService:
     def register_user(
         self,
         email: str,
+        name: str,
         nickname: str,
         password: str,
+        phone: str = None,
     ) -> UserModel:
         """Register a new user."""
         if UserModel.objects.filter(email=email).exists():
@@ -49,8 +51,10 @@ class UserService:
 
         user = UserModel.objects.create_user(
             email=email,
+            name=name,
             nickname=nickname,
             password=password,
+            phone=phone,
         )
 
         return user

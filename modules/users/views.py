@@ -1,11 +1,13 @@
 """
 Users module API views.
 """
+import logging
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError as DRFValidationError
 
 from .services import UserService
 from .serializers import (
@@ -16,9 +18,137 @@ from .serializers import (
     TokenSerializer,
     TokenBalanceSerializer,
 )
+from .exceptions import UserAlreadyExistsError
+from shared.exceptions import ValidationError
+
+logger = logging.getLogger(__name__)
 
 
 user_service = UserService()
+
+
+@extend_schema(tags=['Users'])
+class SignupView(APIView):
+    """회원가입 API - 사용자의 정보를 입력받아 신규 계정을 생성"""
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=UserCreateSerializer,
+        responses={
+            201: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'object',
+                        'properties': {
+                            'memberId': {'type': 'integer'},
+                            'email': {'type': 'string'},
+                            'created_at': {'type': 'string', 'format': 'date-time'},
+                        }
+                    }
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
+        summary="회원가입",
+        description="사용자의 정보를 입력받아 신규 계정을 생성",
+    )
+    def post(self, request):
+        try:
+            serializer = UserCreateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            user = user_service.register_user(**serializer.validated_data)
+
+            # 성공 응답 형식: {status, message, data}
+            return Response(
+                {
+                    'status': 201,
+                    'message': '회원가입이 완료되었습니다.',
+                    'data': {
+                        'memberId': user.id,
+                        'email': user.email,
+                        'created_at': user.created_at.isoformat() if user.created_at else None,
+                    }
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except DRFValidationError as e:
+            # DRF ValidationError 처리 (필드 검증 실패)
+            error_message = "유효하지 않은 입력값입니다."
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    # 필드별 에러 메시지 추출
+                    for field, messages in e.detail.items():
+                        if isinstance(messages, list) and messages:
+                            error_message = messages[0]
+                            break
+                elif isinstance(e.detail, list) and e.detail:
+                    error_message = e.detail[0]
+            
+            return Response(
+                {
+                    'status': 400,
+                    'message': error_message,
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except ValidationError as e:
+            # 커스텀 ValidationError 처리
+            error_message = e.message
+            if e.field == 'email':
+                error_message = "유효하지 않은 이메일 형식입니다."
+            elif e.field == 'phone_number':
+                error_message = "유효하지 않은 전화번호 형식입니다."
+            
+            return Response(
+                {
+                    'status': 400,
+                    'message': error_message,
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except UserAlreadyExistsError as e:
+            # 중복 사용자 에러 처리
+            if e.field == 'email':
+                error_message = "이미 사용 중인 이메일입니다."
+            elif e.field == 'nickname':
+                error_message = "이미 사용 중인 닉네임입니다."
+            else:
+                error_message = e.message
+            
+            return Response(
+                {
+                    'status': 400,
+                    'message': error_message,
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            # 기타 서버 에러 처리
+            logger.error(f"회원가입 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 @extend_schema(tags=['Auth'])
