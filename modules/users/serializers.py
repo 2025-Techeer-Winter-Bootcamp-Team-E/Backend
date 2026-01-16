@@ -125,3 +125,13 @@ class CartItemSerializer(serializers.Serializer):
     quantity = serializers.IntegerField()
     price = serializers.IntegerField()
     total_price = serializers.IntegerField()
+
+
+class PurchaseTimerSerializer(serializers.Serializer):
+    """Serializer for purchase timer response."""
+    timer_id = serializers.IntegerField()
+    product_id = serializers.IntegerField()
+    product_name = serializers.CharField()
+    target_price = serializers.IntegerField()
+    remaining_time = serializers.CharField()
+    is_expired = serializers.BooleanField()

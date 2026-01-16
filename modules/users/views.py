@@ -22,11 +22,13 @@ from .serializers import (
     RecentlyViewedProductSerializer,
     WishlistProductSerializer,
     CartItemSerializer,
+    PurchaseTimerSerializer,
 )
 from .exceptions import UserAlreadyExistsError, InvalidCredentialsError, UserInactiveError
 from shared.exceptions import ValidationError
 from modules.search.services import RecentViewService
 from modules.orders.services import StorageService
+from modules.price_prediction.services import PricePredictionService
 from modules.products.serializers import ProductListSerializer
 from modules.search.serializers import RecentViewSerializer
 from modules.orders.serializers import StorageItemSerializer
@@ -37,6 +39,7 @@ logger = logging.getLogger(__name__)
 user_service = UserService()
 recent_view_service = RecentViewService()
 storage_service = StorageService()
+price_prediction_service = PricePredictionService()
 
 @extend_schema(tags=['Users'])
 class SignupView(APIView):
@@ -822,6 +825,121 @@ class CartListView(APIView):
             )
         except Exception as e:
             logger.error(f"장바구니 목록 조회 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+@extend_schema(tags=['Users'])
+class PurchaseTimersView(APIView):
+    """구매 타이머 목록 조회 API - 상품 상세 페이지에서 설정하여 보관함에 저장된 적정 구매 타이머 리스트를 조회"""
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'timer_id': {'type': 'integer'},
+                                'product_id': {'type': 'integer'},
+                                'product_name': {'type': 'string'},
+                                'target_price': {'type': 'integer'},
+                                'remaining_time': {'type': 'string'},
+                                'is_expired': {'type': 'boolean'},
+                            }
+                        }
+                    }
+                }
+            },
+            401: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 401,
+                    'message': '로그인이 필요합니다.'
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.'
+                }
+            }
+        },
+        summary="구매 타이머 목록 조회",
+        description="상품 상세 페이지에서 설정하여 보관함에 저장된 적정 구매 타이머 리스트를 조회",
+    )
+    def get(self, request):
+        try:
+            from django.utils import timezone
+            from datetime import timedelta
+            
+            # 사용자의 활성화된 구매 타이머(예측) 목록 조회
+            predictions = price_prediction_service.get_user_predictions(
+                user_id=request.user.id,
+                is_active=True,
+                limit=100  # 충분히 큰 값으로 설정
+            )
+            
+            now = timezone.now()
+            data = []
+            
+            for prediction in predictions:
+                # prediction_date를 만료 시간으로 사용
+                expires_at = prediction.prediction_date
+                
+                # 만료 여부 확인
+                is_expired = now >= expires_at
+                
+                # 남은 시간 계산 (HH:MM:SS 형식)
+                if is_expired:
+                    remaining_time = "00:00:00"
+                else:
+                    time_diff = expires_at - now
+                    total_seconds = int(time_diff.total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    seconds = total_seconds % 60
+                    remaining_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                
+                data.append({
+                    'timer_id': prediction.id,
+                    'product_id': prediction.product.id,
+                    'product_name': prediction.product.name,
+                    'target_price': prediction.target_price,
+                    'remaining_time': remaining_time,
+                    'is_expired': is_expired,
+                })
+            
+            return Response(
+                {
+                    'status': 200,
+                    'message': '구매 타이머 목록 조회 성공',
+                    'data': data
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"구매 타이머 목록 조회 중 서버 오류 발생: {str(e)}", exc_info=True)
             return Response(
                 {
                     'status': 500,
