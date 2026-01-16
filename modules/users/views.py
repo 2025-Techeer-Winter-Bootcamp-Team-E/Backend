@@ -18,7 +18,7 @@ from .serializers import (
     TokenSerializer,
     TokenBalanceSerializer,
     SocialLoginSerializer,
-    PasswordChangeSerializer
+    PasswordChangeSerializer,
 )
 from .exceptions import UserAlreadyExistsError, InvalidCredentialsError, UserInactiveError
 from shared.exceptions import ValidationError
@@ -511,3 +511,41 @@ class PasswordChangeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+@extend_schema(tags=['Users'])
+class UserDeleteView(APIView):
+    """회원 탈퇴 API - 로그인한 사용자를 Soft Delete 처리"""
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={
+            200: {'description': '회원 탈퇴 처리가 완료되었습니다.'},
+            401: {'description': '로그인이 필요합니다.'},
+            500: {'description': '서버 내부 오류가 발생했습니다.'},
+        },
+        summary="회원 탈퇴",
+        description="로그인한 사용자를 Soft Delete 처리하고 is_active를 False로 변경합니다."
+    )
+    def delete(self, request):
+        try:
+            user = request.user
+
+            # 이미 탈퇴된 경우도 그냥 처리
+            user_service.delete_user(user.id)
+
+            return Response(
+                {
+                    "status": 200,
+                    "message": "회원 탈퇴 처리가 완료되었습니다."
+                },
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            logger.error(f"회원 탈퇴 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    "status": 500,
+                    "message": "서버 내부 오류가 발생했습니다."
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
