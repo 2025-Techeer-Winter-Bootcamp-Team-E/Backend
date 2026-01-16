@@ -15,6 +15,9 @@ from .views import (
     UserTokenBalanceView,
     PasswordChangeView,
     UserDeleteView,
+    RecentlyViewedProductsView,
+    FavoriteProductsView,
+    CartListView,
 )
 
 urlpatterns = [
@@ -32,5 +35,7 @@ urlpatterns = [
     path('social-login/', SocialLoginView.as_view(), name='user-social-login'),
     path('password/', PasswordChangeView.as_view()),
     path('me/', UserDeleteView.as_view(), name='user-delete'),
-
+    path('recent-products/', RecentlyViewedProductsView.as_view(), name='recently-viewed-products'),
+    path('wishlist/', FavoriteProductsView.as_view(), name='favorite-products'),
+    path('cart/', CartListView.as_view(), name='user-cart'),
 ]

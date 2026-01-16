@@ -177,7 +177,7 @@ class UserService:
         user.is_active = False
         user.save()
         return True
-        
+
     def change_password(self, user, current_password: str, new_password: str):
         # 1. 현재 비밀번호 확인
         if not user.check_password(current_password):
@@ -189,6 +189,29 @@ class UserService:
 
         return True
 
+
+    def get_recently_viewed_products(self, user_id: int):
+        """
+        사용자가 최근 본 상품 리스트 조회.
+        단순 ManyToMany 관계라면 모든 연결 상품 반환.
+        """
+        user = self.get_user_by_id(user_id)
+        if not user:
+            return []
+
+        # user.recently_viewed_products는 ManyToManyField 이름
+        return user.recently_viewed_products.all().order_by('-id')  # 최신 순 정렬
+
+
+    def get_favorite_products(self, user_id: int):
+        """
+        사용자가 좋아요/관심 등록한 상품 리스트 조회.
+        """
+        user = self.get_user_by_id(user_id)
+        if not user:
+            return []
+
+        return user.favorite_products.all().order_by('-id')
 
 
 

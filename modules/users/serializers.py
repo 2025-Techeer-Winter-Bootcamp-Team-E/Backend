@@ -7,6 +7,7 @@ from rest_framework import serializers
 from .models import UserModel
 
 
+
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for user output."""
 
@@ -97,3 +98,30 @@ class PasswordChangeSerializer(serializers.Serializer):
         if len(value) < 8:
             raise serializers.ValidationError("비밀번호는 8자 이상이어야 합니다.")
         return value
+
+
+class RecentlyViewedProductSerializer(serializers.Serializer):
+    """Serializer for recently viewed product response."""
+    product_id = serializers.IntegerField()
+    product_name = serializers.CharField()
+    thumbnail_url = serializers.CharField(allow_null=True)
+    viewed_at = serializers.DateTimeField()
+
+
+class WishlistProductSerializer(serializers.Serializer):
+    """Serializer for wishlist product response."""
+    wishlist_id = serializers.IntegerField()
+    product_id = serializers.IntegerField()
+    product_name = serializers.CharField()
+    price = serializers.IntegerField()
+    added_at = serializers.DateTimeField()
+
+
+class CartItemSerializer(serializers.Serializer):
+    """Serializer for cart item response."""
+    cart_item_id = serializers.IntegerField()
+    product_id = serializers.IntegerField()
+    product_name = serializers.CharField()
+    quantity = serializers.IntegerField()
+    price = serializers.IntegerField()
+    total_price = serializers.IntegerField()
