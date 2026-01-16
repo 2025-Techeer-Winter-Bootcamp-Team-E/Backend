@@ -13,7 +13,8 @@ from .views import (
     UserListView,
     UserDetailView,
     UserTokenBalanceView,
-    PasswordChangeView
+    PasswordChangeView,
+    UserDeleteView,
 )
 
 urlpatterns = [
@@ -30,6 +31,6 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='user-login'),
     path('social-login/', SocialLoginView.as_view(), name='user-social-login'),
     path('password/', PasswordChangeView.as_view()),
-
+    path('me/', UserDeleteView.as_view(), name='user-delete'),
 
 ]
