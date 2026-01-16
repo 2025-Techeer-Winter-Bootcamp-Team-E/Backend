@@ -176,23 +176,78 @@ def crawl_product(danawa_product_id: str) -> dict:
             # 4. 가격 이력 저장 (PriceHistoryModel) - 24개월
             # ========================================
             history_count = 0
-            now = timezone.now()
 
             for ph in price_history:
-                # month_offset: 1 = 1개월 전, 24 = 24개월 전
-                recorded_date = now - relativedelta(months=ph.month_offset)
+                if ph.price is None:
+                    continue
 
-                # 중복 방지: 해당 월에 이미 기록이 있으면 업데이트
-                PriceHistoryModel.objects.update_or_create(
-                    product=product,
-                    recorded_at__year=recorded_date.year,
-                    recorded_at__month=recorded_date.month,
-                    defaults={
-                        'lowest_price': ph.price,
-                        'recorded_at': recorded_date,
-                    }
-                )
-                history_count += 1
+                # 날짜 문자열 파싱 (형식: "YY-MM" 또는 "MM-DD")
+                recorded_date = None
+                if ph.date:
+                    try:
+                        parts = ph.date.split('-')
+                        if len(parts) == 2:
+                            first, second = parts
+                            # "YY-MM" 형식 (24-04, 25-01 등)
+                            if int(first) > 12:
+                                year = 2000 + int(first)
+                                month = int(second)
+                                recorded_date = timezone.make_aware(
+                                    datetime(year, month, 1)
+                                )
+                            # "MM-DD" 형식 (01-06, 12-23 등) - 최근 데이터
+                            else:
+                                month = int(first)
+                                day = int(second)
+                                # 올해 또는 작년으로 추정
+                                current_year = timezone.now().year
+                                try:
+                                    recorded_date = timezone.make_aware(
+                                        datetime(current_year, month, day)
+                                    )
+                                    # 미래 날짜면 작년으로 조정
+                                    if recorded_date > timezone.now():
+                                        recorded_date = timezone.make_aware(
+                                            datetime(current_year - 1, month, day)
+                                        )
+                                except ValueError:
+                                    # 날짜가 유효하지 않으면 월의 1일로 설정
+                                    recorded_date = timezone.make_aware(
+                                        datetime(current_year, month, 1)
+                                    )
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse date '{ph.date}': {e}")
+                        continue
+
+                if not recorded_date:
+                    continue
+
+                # 중복 방지: 해당 날짜에 이미 기록이 있으면 업데이트
+                try:
+                    PriceHistoryModel.objects.update_or_create(
+                        product=product,
+                        recorded_at__date=recorded_date.date(),
+                        defaults={
+                            'lowest_price': ph.price,
+                            'recorded_at': recorded_date,
+                        }
+                    )
+                    history_count += 1
+                except Exception as e:
+                    # 중복 키 등의 오류 시 월 단위로 재시도
+                    try:
+                        PriceHistoryModel.objects.update_or_create(
+                            product=product,
+                            recorded_at__year=recorded_date.year,
+                            recorded_at__month=recorded_date.month,
+                            defaults={
+                                'lowest_price': ph.price,
+                                'recorded_at': recorded_date,
+                            }
+                        )
+                        history_count += 1
+                    except Exception:
+                        logger.warning(f"Failed to save price history for {recorded_date}: {e}")
 
             # ========================================
             # 5. 리뷰 저장 (ReviewModel)
