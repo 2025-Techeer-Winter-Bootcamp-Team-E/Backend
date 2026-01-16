@@ -17,8 +17,7 @@ from .views import (
 urlpatterns = [
     # Auth
     path('signup/', SignupView.as_view(), name='user-signup'),
-    path('register/', RegisterView.as_view(), name='user-register'),
-    path('login/', LoginView.as_view(), name='user-login'),
+
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
 
     # User
@@ -26,4 +25,5 @@ urlpatterns = [
     path('', UserListView.as_view(), name='user-list'),
     path('<int:user_id>/', UserDetailView.as_view(), name='user-detail'),
     path('<int:user_id>/token-balance/', UserTokenBalanceView.as_view(), name='user-token-balance'),
+    path('login/', LoginView.as_view(), name='user-login')
 ]

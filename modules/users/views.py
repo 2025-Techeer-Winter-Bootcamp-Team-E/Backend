@@ -18,7 +18,7 @@ from .serializers import (
     TokenSerializer,
     TokenBalanceSerializer,
 )
-from .exceptions import UserAlreadyExistsError
+from .exceptions import UserAlreadyExistsError, InvalidCredentialsError, UserInactiveError
 from shared.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -173,23 +173,100 @@ class RegisterView(APIView):
         )
 
 
-@extend_schema(tags=['Auth'])
+@extend_schema(tags=['Users'])     
+
 class LoginView(APIView):
-    """User login endpoint."""
+    """로그인 API - 사용자의 계정 정보를 확인하고 인증 토큰을 발급"""
     permission_classes = [AllowAny]
 
     @extend_schema(
         request=LoginSerializer,
-        responses={200: TokenSerializer},
-        summary="Login and get tokens",
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'access_token': {'type': 'string', 'description': 'JWT 액세스 토큰'},
+                    'refresh_token': {'type': 'string', 'description': 'JWT 리프레시 토큰'},
+                    'token_type': {'type': 'string', 'description': '토큰 타입 (Bearer)', 'default': 'Bearer'},
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 400,
+                    'message': '유효하지 않은 이메일 또는 비밀번호입니다.'
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
+        summary="로그인",
+        description="사용자의 계정 정보를 확인하고 인증 토큰을 발급\n\n**Request Body 예시:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"password\": \"securePassword123!\"\n}\n```"
     )
     def post(self, request):
-        serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer = LoginSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
 
-        result = user_service.authenticate(**serializer.validated_data)
+            result = user_service.authenticate(**serializer.validated_data)
 
-        return Response(TokenSerializer(result).data)
+            return Response(TokenSerializer(result).data)
+        except DRFValidationError as e:
+            # DRF ValidationError 처리 (필드 검증 실패)
+            error_message = "유효하지 않은 입력값입니다."
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    for field, messages in e.detail.items():
+                        if isinstance(messages, list) and messages:
+                            error_message = messages[0]
+                            break
+                elif isinstance(e.detail, list) and e.detail:
+                    error_message = e.detail[0]
+            
+            return Response(
+                {
+                    'status': 400,
+                    'message': error_message,
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except InvalidCredentialsError:
+            # 인증 실패 에러 처리
+            return Response(
+                {
+                    'status': 400,
+                    'message': '유효하지 않은 이메일 또는 비밀번호입니다.',
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except UserInactiveError as e:
+            # 비활성화된 사용자 에러 처리
+            return Response(
+                {
+                    'status': 400,
+                    'message': '비활성화된 계정입니다.',
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            # 기타 서버 에러 처리
+            logger.error(f"로그인 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 @extend_schema(tags=['Users'])
