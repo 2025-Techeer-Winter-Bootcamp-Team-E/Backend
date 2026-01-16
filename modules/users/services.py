@@ -177,7 +177,17 @@ class UserService:
         user.is_active = False
         user.save()
         return True
+        
+    def change_password(self, user, current_password: str, new_password: str):
+        # 1. 현재 비밀번호 확인
+        if not user.check_password(current_password):
+            raise InvalidCredentialsError("현재 비밀번호가 올바르지 않습니다.")
 
+        # 2. 새 비밀번호 설정
+        user.set_password(new_password)
+        user.save()
+
+        return True
 
 
 
@@ -225,3 +235,6 @@ class SocialAuthService:
             "email": data.get("email"),
             "name": data.get("name"),
         }
+
+
+    

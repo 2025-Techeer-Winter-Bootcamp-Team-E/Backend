@@ -18,6 +18,7 @@ from .serializers import (
     TokenSerializer,
     TokenBalanceSerializer,
     SocialLoginSerializer,
+    PasswordChangeSerializer
 )
 from .exceptions import UserAlreadyExistsError, InvalidCredentialsError, UserInactiveError
 from shared.exceptions import ValidationError
@@ -466,3 +467,47 @@ class SocialLoginView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+@extend_schema(tags=['Users'])
+class PasswordChangeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=PasswordChangeSerializer,
+        responses={
+            200: {'description': '비밀번호가 성공적으로 변경되었습니다.'},
+            400: {'description': '현재 비밀번호가 일치하지 않습니다.'},
+            401: {'description': '로그인이 필요합니다.'},
+        },
+        summary="비밀번호 변경",
+        description="현재 비밀번호를 확인한 후 새로운 비밀번호로 변경합니다."
+    )
+    def patch(self, request):
+        serializer = PasswordChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            user_service.change_password(
+                user=request.user,
+                current_password=serializer.validated_data['current_password'],
+                new_password=serializer.validated_data['new_password'],
+            )
+
+            return Response(
+                {
+                    "status": 200,
+                    "message": "비밀번호가 성공적으로 변경되었습니다."
+                },
+                status=status.HTTP_200_OK
+            )
+
+        except InvalidCredentialsError as e:
+            return Response(
+                {
+                    "status": 400,
+                    "message": str(e)
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+

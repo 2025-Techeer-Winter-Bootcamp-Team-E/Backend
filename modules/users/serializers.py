@@ -88,3 +88,12 @@ class TokenBalanceSerializer(serializers.Serializer):
     """Serializer for token balance update."""
 
     amount = serializers.IntegerField()
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate_new_password(self, value):
+        if len(value) < 8:
+            raise serializers.ValidationError("비밀번호는 8자 이상이어야 합니다.")
+        return value
