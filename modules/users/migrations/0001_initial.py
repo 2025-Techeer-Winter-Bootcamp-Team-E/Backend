@@ -49,9 +49,19 @@ class Migration(migrations.Migration):
                 ),
                 ("password", models.CharField(max_length=255, verbose_name="비밀번호")),
                 (
+                    "name",
+                    models.CharField(max_length=50, verbose_name="이름"),
+                ),
+                (
                     "nickname",
                     models.CharField(
                         db_index=True, max_length=50, unique=True, verbose_name="닉네임"
+                    ),
+                ),
+                (
+                    "phone",
+                    models.CharField(
+                        blank=True, max_length=20, null=True, verbose_name="전화번호"
                     ),
                 ),
                 (

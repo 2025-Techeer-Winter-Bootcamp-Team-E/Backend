@@ -188,6 +188,17 @@ SPECTACULAR_SETTINGS = {
     'TITLE': 'E-commerce Backend API',
     'DESCRIPTION': 'DDD Architecture based E-commerce Backend API',
     'VERSION': '1.0.0',
+
+    'SECURITY': [{'BearerAuth': []}],
+    'SECURITY_SCHEMES': {
+        'BearerAuth': {
+            'type': 'http',
+            'scheme': 'bearer',
+            'bearerFormat': 'JWT',
+        }
+    },
+
+    
     'SERVE_INCLUDE_SCHEMA': False,
     'SWAGGER_UI_DIST': 'SIDECAR',
     'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',

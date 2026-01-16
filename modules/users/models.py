@@ -8,12 +8,12 @@ from django.db import models
 class UserManager(BaseUserManager):
     """Custom user manager."""
 
-    def create_user(self, email, nickname, password=None, **extra_fields):
+    def create_user(self, email, nickname, password=None, name=None, phone=None, **extra_fields):
         """Create and save a regular user."""
         if not email:
             raise ValueError('The Email field must be set')
         email = self.normalize_email(email)
-        user = self.model(email=email, nickname=nickname, **extra_fields)
+        user = self.model(email=email, nickname=nickname, name=name, phone=phone, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -45,11 +45,21 @@ class UserModel(AbstractBaseUser, PermissionsMixin):
         max_length=255,
         verbose_name='비밀번호'
     )
+    name = models.CharField(
+        max_length=50,
+        verbose_name='이름'
+    )
     nickname = models.CharField(
         max_length=50,
         unique=True,
         db_index=True,
         verbose_name='닉네임'
+    )
+    phone = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        verbose_name='전화번호'
     )
     token_balance = models.IntegerField(
         null=True,
@@ -90,7 +100,8 @@ class UserModel(AbstractBaseUser, PermissionsMixin):
     objects = UserManager()
 
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['nickname']
+    REQUIRED_FIELDS = ['nickname', 'name', 'phone']
+
 
     class Meta:
         db_table = 'users'
