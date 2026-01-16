@@ -18,6 +18,7 @@ from .views import (
     RecentlyViewedProductsView,
     FavoriteProductsView,
     CartListView,
+    PurchaseTimersView,
 )
 
 urlpatterns = [
@@ -38,4 +39,5 @@ urlpatterns = [
     path('recent-products/', RecentlyViewedProductsView.as_view(), name='recently-viewed-products'),
     path('wishlist/', FavoriteProductsView.as_view(), name='favorite-products'),
     path('cart/', CartListView.as_view(), name='user-cart'),
+    path('timers/', PurchaseTimersView.as_view(), name='purchase-timers'),
 ]
