@@ -81,7 +81,7 @@ class SocialLoginSerializer(serializers.Serializer):
     """Serializer for social login request."""
 
     provider = serializers.ChoiceField(choices=['google', 'kakao', 'naver'])
-    access_token = serializers.CharField()
+    social_token = serializers.CharField(write_only=True)
 
 
 class TokenBalanceSerializer(serializers.Serializer):

@@ -17,6 +17,7 @@ from .serializers import (
     LoginSerializer,
     TokenSerializer,
     TokenBalanceSerializer,
+    SocialLoginSerializer,
 )
 from .exceptions import UserAlreadyExistsError, InvalidCredentialsError, UserInactiveError
 from shared.exceptions import ValidationError
@@ -352,3 +353,116 @@ class UserTokenBalanceView(APIView):
         )
 
         return Response(UserSerializer(user).data)
+
+
+@extend_schema(tags=['Users'])
+class SocialLoginView(APIView):
+    """소셜 로그인 API - 카카오, 구글 등 외부 계정을 통해 로그인"""
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=SocialLoginSerializer,
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'object',
+                        'properties': {
+                            'access_token': {'type': 'string', 'description': 'JWT 액세스 토큰'},
+                            'refresh_token': {'type': 'string', 'description': 'JWT 리프레시 토큰'},
+                            'token_type': {'type': 'string', 'description': '토큰 타입 (Bearer)', 'default': 'Bearer'},
+                        }
+                    }
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
+        summary="소셜 로그인",
+        description="카카오, 구글 등 외부 계정을 통해 로그인\n\n**Request Body 예시:**\n```json\n{\n  \"provider\": \"kakao\",\n  \"social_token\": \"access_token_from_social_provider\"\n}\n```",
+    )
+    def post(self, request):
+        try:
+            serializer = SocialLoginSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            result = user_service.social_login(
+                provider=serializer.validated_data['provider'],
+                social_token=serializer.validated_data['social_token'],
+            )
+
+            # 성공 응답 형식: {status, message, data}
+            return Response(
+                {
+                    'status': 200,
+                    'message': '소셜 로그인이 완료되었습니다.',
+                    'data': {
+                        'access_token': result['access_token'],
+                        'refresh_token': result['refresh_token'],
+                        'token_type': result['token_type'],
+                    }
+                },
+                status=status.HTTP_200_OK
+            )
+        except DRFValidationError as e:
+            # DRF ValidationError 처리 (필드 검증 실패)
+            error_message = "유효하지 않은 입력값입니다."
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    for field, messages in e.detail.items():
+                        if isinstance(messages, list) and messages:
+                            error_message = messages[0]
+                            break
+                elif isinstance(e.detail, list) and e.detail:
+                    error_message = e.detail[0]
+            
+            return Response(
+                {
+                    'status': 400,
+                    'message': error_message,
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except InvalidCredentialsError:
+            # 인증 실패 에러 처리 (잘못된 토큰 또는 지원하지 않는 제공자)
+            return Response(
+                {
+                    'status': 400,
+                    'message': '잘못된 소셜 토큰이거나 지원하지 않는 제공자입니다.',
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except UserInactiveError:
+            # 비활성화된 사용자 에러 처리
+            return Response(
+                {
+                    'status': 400,
+                    'message': '비활성화된 계정입니다.',
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            # 기타 서버 에러 처리
+            logger.error(f"소셜 로그인 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

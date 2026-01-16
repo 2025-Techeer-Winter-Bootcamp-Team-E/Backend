@@ -8,6 +8,7 @@ from .views import (
     SignupView,
     RegisterView,
     LoginView,
+    SocialLoginView,
     UserMeView,
     UserListView,
     UserDetailView,
@@ -15,15 +16,20 @@ from .views import (
 )
 
 urlpatterns = [
-    # Auth
-    path('signup/', SignupView.as_view(), name='user-signup'),
+    
+    
 
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
 
     # User
+    
     path('me/', UserMeView.as_view(), name='user-me'),
     path('', UserListView.as_view(), name='user-list'),
     path('<int:user_id>/', UserDetailView.as_view(), name='user-detail'),
     path('<int:user_id>/token-balance/', UserTokenBalanceView.as_view(), name='user-token-balance'),
-    path('login/', LoginView.as_view(), name='user-login')
+    
+    path('signup/', SignupView.as_view(), name='user-signup'),
+    path('login/', LoginView.as_view(), name='user-login'),
+    path('social-login/', SocialLoginView.as_view(), name='user-social-login'),
+
 ]
