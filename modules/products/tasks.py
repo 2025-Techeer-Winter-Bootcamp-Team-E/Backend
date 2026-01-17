@@ -93,8 +93,8 @@ def crawl_product(danawa_product_id: str) -> dict:
             if not full_data:
                 return {'success': False, 'error': 'Failed to crawl product data'}
 
-            product_info = full_data.get('product')
-            mall_prices = full_data.get('mall_prices', [])
+            product_info = full_data.get('product_info')
+            mall_prices = full_data.get('mall_list', [])
             price_history = full_data.get('price_history', [])
             reviews = full_data.get('reviews', [])
 
@@ -143,11 +143,11 @@ def crawl_product(danawa_product_id: str) -> dict:
             for mall in mall_prices:
                 MallInformationModel.objects.update_or_create(
                     product=product,
-                    mall_name=mall.mall_name,
+                    mall_name=mall.seller_name,
                     defaults={
                         'current_price': mall.price,
-                        'product_page_url': mall.product_url or '',
-                        'seller_logo_url': mall.logo_url or '',
+                        'product_page_url': mall.seller_url or '',
+                        'seller_logo_url': mall.seller_logo or '',
                         'representative_image_url': product_info.image_url or '',
                         'additional_image_urls': product_info.additional_images,
                         'detail_page_image_url': ', '.join(product_info.detail_page_images) if product_info.detail_page_images else '',
@@ -215,7 +215,7 @@ def crawl_product(danawa_product_id: str) -> dict:
                     # 리뷰 내용으로 중복 체크
                     existing_review = ReviewModel.objects.filter(
                         product=product,
-                        reviewer_name=review.reviewer_name,
+                        reviewer_name=review.reviewer,
                         content=review.content[:100] if review.content else ''
                     ).first()
 
@@ -224,7 +224,7 @@ def crawl_product(danawa_product_id: str) -> dict:
                             product=product,
                             user=system_user,
                             mall_name=review.shop_name,
-                            reviewer_name=review.reviewer_name,
+                            reviewer_name=review.reviewer,
                             content=review.content,
                             rating=review.rating,
                             review_images=review.review_images,
@@ -304,11 +304,11 @@ def crawl_product_basic(danawa_product_id: str) -> dict:
             for mall in mall_prices:
                 MallInformationModel.objects.update_or_create(
                     product=product,
-                    mall_name=mall.mall_name,
+                    mall_name=mall.seller_name,
                     defaults={
                         'current_price': mall.price,
-                        'product_page_url': mall.product_url or '',
-                        'seller_logo_url': mall.logo_url or '',
+                        'product_page_url': mall.seller_url or '',
+                        'seller_logo_url': mall.seller_logo or '',
                         'representative_image_url': product_info.image_url or '',
                         'additional_image_urls': product_info.additional_images,
                     }
@@ -583,7 +583,7 @@ def crawl_product_reviews(danawa_product_id: str, max_pages: int = 5) -> dict:
                 # 중복 체크
                 existing = ReviewModel.objects.filter(
                     product=product,
-                    reviewer_name=review.reviewer_name,
+                    reviewer_name=review.reviewer,
                     content=review.content[:100] if review.content else ''
                 ).exists()
 
@@ -592,7 +592,7 @@ def crawl_product_reviews(danawa_product_id: str, max_pages: int = 5) -> dict:
                         product=product,
                         user=system_user,
                         mall_name=review.shop_name,
-                        reviewer_name=review.reviewer_name,
+                        reviewer_name=review.reviewer,
                         content=review.content,
                         rating=review.rating,
                         review_images=review.review_images,

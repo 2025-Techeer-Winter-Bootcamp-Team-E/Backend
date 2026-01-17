@@ -177,12 +177,31 @@ class DanawaCrawler:
             return None
 
         try:
-            # 상품명
+            # 상품명 (불필요한 텍스트 제거)
             name_elem = soup.select_one('.prod_tit')
-            product_name = name_elem.get_text(strip=True) if name_elem else "Unknown"
+            if name_elem:
+                # 버튼, 링크 등 제거
+                for btn in name_elem.select('.btn_vs_compare, .btn_vs, .vs_compare, button, a, span'):
+                    btn.decompose()
+                product_name = name_elem.get_text(strip=True)
+                # 불필요한 텍스트 제거
+                remove_texts = ['VS검색하기', 'VS검색 도움말', '추천상품과스펙비교하세요', '닫기']
+                for txt in remove_texts:
+                    product_name = product_name.replace(txt, '')
+                product_name = product_name.strip()
+            else:
+                product_name = None
 
-            # 브랜드
-            brand = self._parse_brand(soup)
+            # meta 태그에서 fallback (더 깔끔한 상품명)
+            if not product_name or len(product_name) < 5:
+                meta_title = soup.select_one('meta[property="og:title"]')
+                if meta_title:
+                    product_name = meta_title.get('content', 'Unknown').replace('[다나와] ', '')
+                else:
+                    product_name = "Unknown"
+
+            # 브랜드 (상품명에서 추출)
+            brand = self._parse_brand(soup, product_name)
 
             # 등록월
             registration_date = self._parse_registration_date(soup)
@@ -236,24 +255,56 @@ class DanawaCrawler:
             logger.error(f"Failed to parse product {pcode}: {e}")
             return None
 
-    def _parse_brand(self, soup: BeautifulSoup) -> str:
+    def _parse_brand(self, soup: BeautifulSoup, product_name: str = "") -> str:
         """브랜드 파싱."""
+        # 1. 기존 셀렉터 시도
         brand_elem = soup.select_one('.spec_list .makerName')
         if brand_elem:
             return brand_elem.get_text(strip=True)
 
-        # 대안: 제조사 정보에서 찾기
+        # 2. 제조사 정보에서 찾기
         maker_elem = soup.select_one('.made_info .maker')
         if maker_elem:
             return maker_elem.get_text(strip=True)
+
+        # 3. 상품명 첫 단어에서 브랜드 추출 (예: "LG전자 그램..." -> "LG전자")
+        if product_name:
+            known_brands = [
+                'LG전자', '삼성전자', 'APPLE', 'MSI', 'ASUS', '레노버', 'HP', '에이서',
+                '델', '기가바이트', 'ASRock', '인텔', 'AMD', '엔비디아', 'NVIDIA',
+                '로지텍', '레이저', 'ATK', 'AULA', '커세어', '시게이트', 'WD',
+            ]
+            for brand in known_brands:
+                if brand in product_name:
+                    return brand
+            # 첫 단어 추출
+            first_word = product_name.split()[0] if product_name.split() else ""
+            if first_word and len(first_word) > 1:
+                return first_word
 
         return ""
 
     def _parse_registration_date(self, soup: BeautifulSoup) -> Optional[str]:
         """등록월 파싱."""
+        import re
+
+        # 1. 기존 셀렉터 시도
         reg_elem = soup.select_one('.spec_list .regDate')
         if reg_elem:
             return reg_elem.get_text(strip=True)
+
+        # 2. 페이지 텍스트에서 등록월 패턴 찾기
+        text = soup.get_text()
+        patterns = [
+            r'등록월[:\s]*(\d{4}\.\d{2})',
+            r'(\d{4}\.\d{2})\.\s*등록',
+            r'출시[:\s]*(\d{4}\.\d{2})',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1) + '.'
+
         return None
 
     def _parse_product_status(self, soup: BeautifulSoup) -> Optional[str]:
@@ -265,11 +316,32 @@ class DanawaCrawler:
 
     def _parse_min_price(self, soup: BeautifulSoup) -> int:
         """최저가 파싱."""
+        import re
+
+        # 1. 기존 셀렉터 시도
         price_elem = soup.select_one('.lowest_price .lwst_prc .prc')
         if price_elem:
             price_text = price_elem.get_text(strip=True).replace(',', '').replace('원', '')
             if price_text.isdigit():
                 return int(price_text)
+
+        # 2. 새로운 셀렉터들 시도
+        selectors = [
+            '.box__price.lowest .sell-price',
+            '.sell-price',
+            '.price_num',
+            '.prc_c',
+            '.link__sell-price',
+        ]
+        for selector in selectors:
+            elem = soup.select_one(selector)
+            if elem:
+                price_text = elem.get_text(strip=True).replace(',', '').replace('원', '')
+                # 숫자만 추출
+                price_match = re.search(r'(\d+)', price_text.replace(',', ''))
+                if price_match:
+                    return int(price_match.group(1))
+
         return 0
 
     def _parse_categories(self, soup: BeautifulSoup) -> Dict[str, Optional[str]]:
@@ -281,9 +353,34 @@ class DanawaCrawler:
             'category_4': None,
         }
 
+        # 1. 기존 셀렉터 시도
         breadcrumb = soup.select('.location_category a')
-        for i, item in enumerate(breadcrumb[:4], 1):
-            categories[f'category_{i}'] = item.get_text(strip=True)
+        if not breadcrumb:
+            # 2. 새로운 셀렉터 - location_wrap에서 상품 관련 카테고리만 추출
+            # location_wrap에는 많은 링크가 있으므로 상품 상세 페이지의 실제 경로만 추출
+            # 보통 "컴퓨터/노트북/조립PC > 노트북 > 표준노트북" 형태
+            breadcrumb = soup.select('.location_wrap a')
+
+        # 중복 및 메뉴 항목 제외하고 카테고리 경로 추출
+        seen = set()
+        valid_cats = []
+        skip_keywords = ['홈', '전체', '카테고리', 'AI', '가전', '태블릿', '스포츠', '자동차',
+                        '가구', '식품', '생활', '패션', '반려동물', '로켓배송', '쿠팡']
+
+        for item in breadcrumb:
+            text = item.get_text(strip=True)
+            if text and text not in seen:
+                # 메뉴 항목 건너뛰기
+                if any(skip in text for skip in skip_keywords):
+                    continue
+                if '노트북' in text or 'PC' in text or '컴퓨터' in text or '모니터' in text:
+                    seen.add(text)
+                    valid_cats.append(text)
+                    if len(valid_cats) >= 4:
+                        break
+
+        for i, cat in enumerate(valid_cats[:4], 1):
+            categories[f'category_{i}'] = cat
 
         return categories
 
