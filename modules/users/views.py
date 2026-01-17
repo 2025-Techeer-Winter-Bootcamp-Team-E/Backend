@@ -26,20 +26,20 @@ from .serializers import (
 )
 from .exceptions import UserAlreadyExistsError, InvalidCredentialsError, UserInactiveError
 from shared.exceptions import ValidationError
-from modules.search.services import RecentViewService
-from modules.orders.services import StorageService
-from modules.price_prediction.services import PricePredictionService
+from modules.search.services import RecentViewProductService
+from modules.orders.services import CartService
+from modules.timers.services import TimerService
 from modules.products.serializers import ProductListSerializer
-from modules.search.serializers import RecentViewSerializer
-from modules.orders.serializers import StorageItemSerializer
+from modules.search.serializers import RecentViewProductSerializer
+from modules.orders.serializers import CartItemSerializer as OrderCartItemSerializer
 
 logger = logging.getLogger(__name__)
 
 
 user_service = UserService()
-recent_view_service = RecentViewService()
-storage_service = StorageService()
-price_prediction_service = PricePredictionService()
+recent_view_service = RecentViewProductService()
+cart_service = CartService()
+timer_service = TimerService()
 
 @extend_schema(tags=['Users'])
 class SignupView(APIView):
@@ -708,29 +708,21 @@ class RecentlyViewedProductsView(APIView):
     def get(self, request):
         try:
             limit = int(request.query_params.get('limit', 20))
-            
+
             recent_views = recent_view_service.get_user_recent_views(
                 user_id=request.user.id,
                 limit=limit
             )
-            
+
             # 요구사항에 맞는 형식으로 데이터 변환
+            # 현재 RecentViewProductModel은 danawa_product_id를 사용 (FK 대신 CharField)
             data = []
             for view in recent_views:
-                # thumbnail_url은 MallInformation의 representative_image_url 사용
-                thumbnail_url = None
-                if hasattr(view.product, 'mall_information') and view.product.mall_information.exists():
-                    first_mall = view.product.mall_information.filter(deleted_at__isnull=True).first()
-                    if first_mall:
-                        thumbnail_url = first_mall.representative_image_url
-                
                 data.append({
-                    'product_id': view.product_id,
-                    'product_name': view.product.name,
-                    'thumbnail_url': thumbnail_url,
+                    'danawa_product_id': view.danawa_product_id,
                     'viewed_at': view.updated_at.isoformat() if view.updated_at else view.created_at.isoformat(),
                 })
-            
+
             return Response(
                 {
                     'status': 200,
@@ -798,23 +790,18 @@ class CartListView(APIView):
     )
     def get(self, request):
         try:
-            storage_items = storage_service.get_user_storage_items(request.user.id)
-            
+            cart = cart_service.get_or_create_cart(request.user.id)
+            cart_items = cart_service.get_cart_items(cart.id)
+
             # 요구사항에 맞는 형식으로 데이터 변환
             data = []
-            for item in storage_items:
-                price = item.product.lowest_price if item.product else 0
-                total_price = price * item.quantity
-                
+            for item in cart_items:
                 data.append({
                     'cart_item_id': item.id,
                     'product_id': item.product_id,
-                    'product_name': item.product.name if item.product else '',
                     'quantity': item.quantity,
-                    'price': price,
-                    'total_price': total_price,
                 })
-            
+
             return Response(
                 {
                     'status': 200,
@@ -891,27 +878,26 @@ class PurchaseTimersView(APIView):
     def get(self, request):
         try:
             from django.utils import timezone
-            from datetime import timedelta
-            
-            # 사용자의 활성화된 구매 타이머(예측) 목록 조회
-            predictions = price_prediction_service.get_user_predictions(
+
+            # 사용자의 활성화된 구매 타이머 목록 조회
+            timers = timer_service.get_user_timers(
                 user_id=request.user.id,
-                is_active=True,
-                limit=100  # 충분히 큰 값으로 설정
+                is_notification_enabled=True,
+                limit=100
             )
-            
+
             now = timezone.now()
             data = []
-            
-            for prediction in predictions:
+
+            for timer in timers:
                 # prediction_date를 만료 시간으로 사용
-                expires_at = prediction.prediction_date
-                
+                expires_at = timer.prediction_date
+
                 # 만료 여부 확인
-                is_expired = now >= expires_at
-                
+                is_expired = now >= expires_at if expires_at else True
+
                 # 남은 시간 계산 (HH:MM:SS 형식)
-                if is_expired:
+                if is_expired or not expires_at:
                     remaining_time = "00:00:00"
                 else:
                     time_diff = expires_at - now
@@ -920,16 +906,15 @@ class PurchaseTimersView(APIView):
                     minutes = (total_seconds % 3600) // 60
                     seconds = total_seconds % 60
                     remaining_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                
+
                 data.append({
-                    'timer_id': prediction.id,
-                    'product_id': prediction.product.id,
-                    'product_name': prediction.product.name,
-                    'target_price': prediction.target_price,
+                    'timer_id': timer.id,
+                    'danawa_product_id': timer.danawa_product_id,
+                    'target_price': timer.target_price,
                     'remaining_time': remaining_time,
                     'is_expired': is_expired,
                 })
-            
+
             return Response(
                 {
                     'status': 200,

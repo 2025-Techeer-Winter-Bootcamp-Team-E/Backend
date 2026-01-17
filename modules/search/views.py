@@ -7,13 +7,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 
-from .services import SearchService, RecentViewService
+from .services import SearchService, RecentViewProductService
 from .serializers import (
     SearchQuerySerializer,
     SearchResultSerializer,
     SearchHistorySerializer,
-    RecentViewSerializer,
-    RecentViewCreateSerializer,
+    RecentViewProductSerializer,
+    RecentViewProductCreateSerializer,
 )
 
 
@@ -88,18 +88,18 @@ class SearchHistoryView(APIView):
         return Response(serializer.data)
 
 
-class RecentViewsView(APIView):
-    """Recent views endpoint."""
+class RecentViewProductsView(APIView):
+    """Recent view products endpoint."""
 
     permission_classes = [IsAuthenticated]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.recent_view_service = RecentViewService()
+        self.recent_view_service = RecentViewProductService()
 
     @extend_schema(
         tags=['Search'],
-        summary='Get my recent views',
+        summary='Get my recent view products',
         parameters=[
             OpenApiParameter(
                 name='limit',
@@ -108,7 +108,7 @@ class RecentViewsView(APIView):
                 description='Number of results (default: 20)'
             ),
         ],
-        responses={200: RecentViewSerializer(many=True)},
+        responses={200: RecentViewProductSerializer(many=True)},
     )
     def get(self, request):
         """Get authenticated user's recently viewed products."""
@@ -119,48 +119,48 @@ class RecentViewsView(APIView):
             limit=limit
         )
 
-        serializer = RecentViewSerializer(views, many=True)
+        serializer = RecentViewProductSerializer(views, many=True)
         return Response(serializer.data)
 
     @extend_schema(
         tags=['Search'],
         summary='Record product view',
-        request=RecentViewCreateSerializer,
-        responses={201: RecentViewSerializer},
+        request=RecentViewProductCreateSerializer,
+        responses={201: RecentViewProductSerializer},
     )
     def post(self, request):
         """Record a product view."""
-        serializer = RecentViewCreateSerializer(data=request.data)
+        serializer = RecentViewProductCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         view = self.recent_view_service.record_view(
             user_id=request.user.id,
-            product_id=serializer.validated_data['product_id'],
+            danawa_product_id=serializer.validated_data['danawa_product_id'],
         )
 
         return Response(
-            RecentViewSerializer(view).data,
+            RecentViewProductSerializer(view).data,
             status=status.HTTP_201_CREATED
         )
 
 
-class RecentViewDeleteView(APIView):
-    """Delete recent view endpoint."""
+class RecentViewProductDeleteView(APIView):
+    """Delete recent view product endpoint."""
 
     permission_classes = [IsAuthenticated]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.recent_view_service = RecentViewService()
+        self.recent_view_service = RecentViewProductService()
 
     @extend_schema(
         tags=['Search'],
-        summary='Delete recent view',
+        summary='Delete recent view product',
     )
-    def delete(self, request, product_id: int):
-        """Delete a recent view."""
+    def delete(self, request, danawa_product_id: str):
+        """Delete a recent view product."""
         self.recent_view_service.delete_recent_view(
             user_id=request.user.id,
-            product_id=product_id,
+            danawa_product_id=danawa_product_id,
         )
         return Response(status=status.HTTP_204_NO_CONTENT)

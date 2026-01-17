@@ -22,7 +22,10 @@
       "Bash(docker ps:*)",
       "Bash(docker exec:*)",
       "Bash(git pull:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(docker logs:*)",
+      "Bash(ls:*)",
+      "Bash(python3:*)"
     ]
   }
 }

@@ -7,140 +7,161 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .services import StorageService, PurchaseService, TokenHistoryService, ReviewService
+from .services import CartService, OrderService, OrderHistoryService, ReviewService
 from .serializers import (
-    StorageItemSerializer,
-    StorageItemCreateSerializer,
-    StorageItemUpdateSerializer,
-    PurchaseSerializer,
-    TokenHistorySerializer,
+    CartSerializer,
+    CartItemSerializer,
+    CartItemCreateSerializer,
+    CartItemUpdateSerializer,
+    OrderSerializer,
+    OrderHistorySerializer,
     ReviewSerializer,
     ReviewCreateSerializer,
 )
 
 
-storage_service = StorageService()
-purchase_service = PurchaseService()
-token_history_service = TokenHistoryService()
+cart_service = CartService()
+order_service = OrderService()
+order_history_service = OrderHistoryService()
 review_service = ReviewService()
 
 
-@extend_schema(tags=['Storage'])
-class StorageListView(APIView):
-    """Storage (장바구니) list endpoint."""
+@extend_schema(tags=['Cart'])
+class CartView(APIView):
+    """Cart (장바구니) endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        responses={200: StorageItemSerializer(many=True)},
-        summary="Get current user's storage items",
+        responses={200: CartSerializer},
+        summary="Get current user's cart",
     )
     def get(self, request):
-        items = storage_service.get_user_storage_items(request.user.id)
-        return Response(StorageItemSerializer(items, many=True).data)
+        cart = cart_service.get_or_create_cart(request.user.id)
+        items = cart_service.get_cart_items(cart.id)
+        cart.items = items  # Attach items for serializer
+        return Response(CartSerializer(cart).data)
+
+
+@extend_schema(tags=['Cart'])
+class CartItemListCreateView(APIView):
+    """Cart item list and create endpoint."""
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        request=StorageItemCreateSerializer,
-        responses={201: StorageItemSerializer},
-        summary="Add item to storage",
+        responses={200: CartItemSerializer(many=True)},
+        summary="Get current user's cart items",
+    )
+    def get(self, request):
+        cart = cart_service.get_or_create_cart(request.user.id)
+        items = cart_service.get_cart_items(cart.id)
+        return Response(CartItemSerializer(items, many=True).data)
+
+    @extend_schema(
+        request=CartItemCreateSerializer,
+        responses={201: CartItemSerializer},
+        summary="Add item to cart",
     )
     def post(self, request):
-        serializer = StorageItemCreateSerializer(data=request.data)
+        serializer = CartItemCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         data = serializer.validated_data
-        item = storage_service.add_item(
-            user_id=request.user.id,
+        cart = cart_service.get_or_create_cart(request.user.id)
+        item = cart_service.add_item(
+            cart_id=cart.id,
             product_id=data['product_id'],
             quantity=data['quantity'],
         )
 
-        return Response(StorageItemSerializer(item).data, status=status.HTTP_201_CREATED)
+        return Response(CartItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
-@extend_schema(tags=['Storage'])
-class StorageItemView(APIView):
-    """Storage item endpoint."""
+@extend_schema(tags=['Cart'])
+class CartItemDetailView(APIView):
+    """Cart item detail endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        request=StorageItemUpdateSerializer,
-        responses={200: StorageItemSerializer},
-        summary="Update storage item quantity",
+        request=CartItemUpdateSerializer,
+        responses={200: CartItemSerializer},
+        summary="Update cart item quantity",
     )
     def patch(self, request, product_id: int):
-        serializer = StorageItemUpdateSerializer(data=request.data)
+        serializer = CartItemUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        item = storage_service.update_item_quantity(
-            user_id=request.user.id,
+        cart = cart_service.get_or_create_cart(request.user.id)
+        item = cart_service.update_item_quantity(
+            cart_id=cart.id,
             product_id=product_id,
             quantity=serializer.validated_data['quantity'],
         )
 
         if item:
-            return Response(StorageItemSerializer(item).data)
+            return Response(CartItemSerializer(item).data)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @extend_schema(summary="Remove item from storage")
+    @extend_schema(summary="Remove item from cart")
     def delete(self, request, product_id: int):
-        storage_service.remove_item(request.user.id, product_id)
+        cart = cart_service.get_or_create_cart(request.user.id)
+        cart_service.remove_item(cart.id, product_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-@extend_schema(tags=['Purchase'])
-class PurchaseListCreateView(APIView):
-    """Purchase list and create endpoint."""
+@extend_schema(tags=['Order'])
+class OrderListCreateView(APIView):
+    """Order list and create endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        responses={200: PurchaseSerializer(many=True)},
-        summary="List user's purchases",
+        responses={200: OrderSerializer(many=True)},
+        summary="List user's orders",
     )
     def get(self, request):
-        purchases = purchase_service.get_user_purchases(request.user.id)
-        return Response(PurchaseSerializer(purchases, many=True).data)
+        orders = order_service.get_user_orders(request.user.id)
+        return Response(OrderSerializer(orders, many=True).data)
 
     @extend_schema(
-        responses={201: PurchaseSerializer},
-        summary="Create purchase from storage",
+        responses={201: OrderSerializer},
+        summary="Create order from cart",
     )
     def post(self, request):
-        purchase = purchase_service.create_purchase_from_storage(request.user.id)
-        return Response(PurchaseSerializer(purchase).data, status=status.HTTP_201_CREATED)
+        order = order_service.create_order_from_cart(request.user.id)
+        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
 
-@extend_schema(tags=['Purchase'])
-class PurchaseDetailView(APIView):
-    """Purchase detail endpoint."""
+@extend_schema(tags=['Order'])
+class OrderDetailView(APIView):
+    """Order detail endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        responses={200: PurchaseSerializer},
-        summary="Get purchase detail",
+        responses={200: OrderSerializer},
+        summary="Get order detail",
     )
-    def get(self, request, purchase_id: int):
-        purchase = purchase_service.get_purchase_by_id(purchase_id)
-        if not purchase:
-            return Response({'error': 'Purchase not found'}, status=status.HTTP_404_NOT_FOUND)
+    def get(self, request, order_id: int):
+        order = order_service.get_order_by_id(order_id)
+        if not order:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if purchase.user_id != request.user.id:
-            return Response({'error': 'Purchase not found'}, status=status.HTTP_404_NOT_FOUND)
+        if order.user_id != request.user.id:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response(PurchaseSerializer(purchase).data)
+        return Response(OrderSerializer(order).data)
 
 
-@extend_schema(tags=['Token'])
-class TokenHistoryListView(APIView):
-    """Token history list endpoint."""
+@extend_schema(tags=['Order History'])
+class OrderHistoryListView(APIView):
+    """Order history list endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        responses={200: TokenHistorySerializer(many=True)},
-        summary="List user's token histories",
+        responses={200: OrderHistorySerializer(many=True)},
+        summary="List user's order histories",
     )
     def get(self, request):
-        histories = token_history_service.get_user_token_histories(request.user.id)
-        return Response(TokenHistorySerializer(histories, many=True).data)
+        histories = order_history_service.get_user_order_histories(request.user.id)
+        return Response(OrderHistorySerializer(histories, many=True).data)
 
 
 @extend_schema(tags=['Review'])
@@ -167,7 +188,7 @@ class ReviewListCreateView(APIView):
 
         data = serializer.validated_data
         review = review_service.create_review(
-            product_id=data['product_id'],
+            danawa_product_id=data['danawa_product_id'],
             user_id=request.user.id,
             content=data.get('content'),
             rating=data.get('rating'),
@@ -187,6 +208,6 @@ class ProductReviewListView(APIView):
         responses={200: ReviewSerializer(many=True)},
         summary="List product reviews",
     )
-    def get(self, request, product_id: int):
-        reviews = review_service.get_product_reviews(product_id)
+    def get(self, request, danawa_product_id: str):
+        reviews = review_service.get_product_reviews(danawa_product_id)
         return Response(ReviewSerializer(reviews, many=True).data)

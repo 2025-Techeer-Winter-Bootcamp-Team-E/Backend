@@ -3,7 +3,7 @@ Search serializers.
 """
 from rest_framework import serializers
 
-from .models import SearchModel, RecentViewModel
+from .models import SearchModel, RecentViewProductModel
 
 
 class SearchQuerySerializer(serializers.Serializer):
@@ -65,21 +65,21 @@ class SearchHistorySerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
-class RecentViewSerializer(serializers.ModelSerializer):
-    """Serializer for recent views."""
+class RecentViewProductSerializer(serializers.ModelSerializer):
+    """Serializer for recent view products."""
 
     class Meta:
-        model = RecentViewModel
+        model = RecentViewProductModel
         fields = [
             'id',
-            'product_id',
+            'danawa_product_id',
             'created_at',
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
-class RecentViewCreateSerializer(serializers.Serializer):
-    """Serializer for creating recent view."""
+class RecentViewProductCreateSerializer(serializers.Serializer):
+    """Serializer for creating recent view product."""
 
-    product_id = serializers.IntegerField()
+    danawa_product_id = serializers.CharField(max_length=15)

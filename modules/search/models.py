@@ -34,7 +34,7 @@ class SearchModel(models.Model):
     danawa_product_id = models.CharField(
         max_length=15,
         verbose_name='상품번호',
-        help_text='다나와 상품 고유 번호(가격변동 값 API 사용시 필요)'
+        help_text='다나와 상품 고유 번호'
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -69,20 +69,19 @@ class SearchModel(models.Model):
         return self.deleted_at is not None
 
 
-class RecentViewModel(models.Model):
-    """Recently viewed products."""
+class RecentViewProductModel(models.Model):
+    """Recently viewed products (최근 본 상품)."""
 
     user = models.ForeignKey(
         'users.UserModel',
         on_delete=models.CASCADE,
-        related_name='recent_views',
+        related_name='recent_view_products',
         verbose_name='회원번호'
     )
-    product = models.ForeignKey(
-        'products.ProductModel',
-        on_delete=models.CASCADE,
-        related_name='recent_views',
-        verbose_name='상품번호'
+    danawa_product_id = models.CharField(
+        max_length=15,
+        verbose_name='상품 고유 번호',
+        help_text='다나와 상품 고유 번호'
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -99,16 +98,17 @@ class RecentViewModel(models.Model):
     )
 
     class Meta:
-        db_table = 'recent_views'
-        verbose_name = 'Recent View'
-        verbose_name_plural = 'Recent Views'
+        db_table = 'recent_view_products'
+        verbose_name = 'Recent View Product'
+        verbose_name_plural = 'Recent View Products'
         ordering = ['-updated_at']
         indexes = [
             models.Index(fields=['user', 'updated_at']),
+            models.Index(fields=['danawa_product_id']),
         ]
 
     def __str__(self):
-        return f"User {self.user_id} viewed product {self.product_id}"
+        return f"User {self.user_id} viewed product {self.danawa_product_id}"
 
     @property
     def is_deleted(self) -> bool:

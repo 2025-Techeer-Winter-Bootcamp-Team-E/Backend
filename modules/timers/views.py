@@ -1,5 +1,5 @@
 """
-Price Prediction API views.
+Timers API views.
 """
 from datetime import timedelta
 
@@ -10,34 +10,34 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from django.utils import timezone
 
-from .services import PricePredictionService, PriceHistoryService
+from .services import TimerService, PriceHistoryService
 from .serializers import (
-    PricePredictionSerializer,
-    PricePredictionListSerializer,
-    PricePredictionCreateSerializer,
+    TimerSerializer,
+    TimerListSerializer,
+    TimerCreateSerializer,
     PriceHistorySerializer,
     PriceHistoryCreateSerializer,
     PriceTrendSerializer,
 )
 
 
-prediction_service = PricePredictionService()
+timer_service = TimerService()
 history_service = PriceHistoryService()
 
 
-@extend_schema(tags=['Price Prediction'])
-class PredictionListCreateView(APIView):
-    """List and create predictions."""
+@extend_schema(tags=['Timers'])
+class TimerListCreateView(APIView):
+    """List and create timers."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        summary='Get price predictions',
+        summary='Get price timers',
         parameters=[
             OpenApiParameter(
-                name='product_id',
-                type=int,
+                name='danawa_product_id',
+                type=str,
                 required=False,
-                description='Product ID'
+                description='Danawa Product ID'
             ),
             OpenApiParameter(
                 name='days',
@@ -46,116 +46,105 @@ class PredictionListCreateView(APIView):
                 description='Number of days to predict (default: 7)'
             ),
         ],
-        responses={200: PricePredictionListSerializer(many=True)},
+        responses={200: TimerListSerializer(many=True)},
     )
     def get(self, request):
-        """Get predictions for a product or current user."""
-        product_id = request.query_params.get('product_id')
+        """Get timers for a product or current user."""
+        danawa_product_id = request.query_params.get('danawa_product_id')
         days = int(request.query_params.get('days', 7))
 
-        if product_id:
-            predictions = prediction_service.get_predictions_for_product(
-                product_id=int(product_id),
+        if danawa_product_id:
+            timers = timer_service.get_timers_for_product(
+                danawa_product_id=danawa_product_id,
                 days=days
             )
         else:
-            predictions = prediction_service.get_user_predictions(
+            timers = timer_service.get_user_timers(
                 user_id=request.user.id
             )
 
-        serializer = PricePredictionListSerializer(predictions, many=True)
+        serializer = TimerListSerializer(timers, many=True)
         return Response(serializer.data)
 
     @extend_schema(
-        summary='Create price prediction',
-        request=PricePredictionCreateSerializer,
-        responses={201: PricePredictionSerializer},
+        summary='Create price timer',
+        request=TimerCreateSerializer,
+        responses={201: TimerSerializer},
     )
     def post(self, request):
-        """Generate prediction for a product."""
-        serializer = PricePredictionCreateSerializer(data=request.data)
+        """Generate timer for a product."""
+        serializer = TimerCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        product_id = serializer.validated_data['product_id']
+        danawa_product_id = serializer.validated_data['danawa_product_id']
         target_price = serializer.validated_data['target_price']
         prediction_days = serializer.validated_data['prediction_days']
 
-        # Check if product exists
-        from modules.products.services import ProductService
-        product_service = ProductService()
-        product = product_service.get_product_by_id(product_id)
-
-        if not product:
-            return Response(
-                {'error': 'Product not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Create prediction
+        # Create timer
         prediction_date = timezone.now() + timedelta(days=prediction_days)
-        prediction = prediction_service.create_prediction(
-            product_id=product_id,
+        timer = timer_service.create_timer(
+            danawa_product_id=danawa_product_id,
             user_id=request.user.id,
             target_price=target_price,
             prediction_date=prediction_date,
         )
 
-        result_serializer = PricePredictionSerializer(prediction)
+        result_serializer = TimerSerializer(timer)
         return Response(result_serializer.data, status=status.HTTP_201_CREATED)
 
 
-@extend_schema(tags=['Price Prediction'])
-class PredictionDetailView(APIView):
-    """Prediction detail endpoint."""
+@extend_schema(tags=['Timers'])
+class TimerDetailView(APIView):
+    """Timer detail endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        summary='Get prediction detail',
-        responses={200: PricePredictionSerializer},
+        summary='Get timer detail',
+        responses={200: TimerSerializer},
     )
-    def get(self, request, prediction_id: int):
-        """Get prediction by ID."""
-        prediction = prediction_service.get_prediction_by_id(prediction_id)
-        if not prediction:
+    def get(self, request, timer_id: int):
+        """Get timer by ID."""
+        timer = timer_service.get_timer_by_id(timer_id)
+        if not timer:
             return Response(
-                {'error': 'Prediction not found'},
+                {'error': 'Timer not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
         # Check ownership
-        if prediction.user_id != request.user.id and not request.user.is_staff:
+        if timer.user_id != request.user.id and not request.user.is_staff:
             return Response(
                 {'error': 'Permission denied'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        serializer = PricePredictionSerializer(prediction)
+        serializer = TimerSerializer(timer)
         return Response(serializer.data)
 
     @extend_schema(
-        summary='Delete prediction',
+        summary='Delete timer',
     )
-    def delete(self, request, prediction_id: int):
-        """Delete a prediction."""
-        prediction = prediction_service.get_prediction_by_id(prediction_id)
-        if not prediction:
+    def delete(self, request, timer_id: int):
+        """Delete a timer."""
+        timer = timer_service.get_timer_by_id(timer_id)
+        if not timer:
             return Response(
-                {'error': 'Prediction not found'},
+                {'error': 'Timer not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
         # Check ownership
-        if prediction.user_id != request.user.id and not request.user.is_staff:
+        if timer.user_id != request.user.id and not request.user.is_staff:
             return Response(
                 {'error': 'Permission denied'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        prediction_service.delete_prediction(prediction_id)
+        timer_service.delete_timer(timer_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-@extend_schema(tags=['Price Prediction'])
+@extend_schema(tags=['Timers'])
 class PriceTrendView(APIView):
     """Get price trend analysis."""
     permission_classes = [AllowAny]
@@ -164,10 +153,10 @@ class PriceTrendView(APIView):
         summary='Get price trend',
         parameters=[
             OpenApiParameter(
-                name='product_id',
-                type=int,
+                name='danawa_product_id',
+                type=str,
                 required=True,
-                description='Product ID'
+                description='Danawa Product ID'
             ),
             OpenApiParameter(
                 name='days',
@@ -180,17 +169,17 @@ class PriceTrendView(APIView):
     )
     def get(self, request):
         """Analyze price trend for a product."""
-        product_id = request.query_params.get('product_id')
+        danawa_product_id = request.query_params.get('danawa_product_id')
         days = int(request.query_params.get('days', 30))
 
-        if not product_id:
+        if not danawa_product_id:
             return Response(
-                {'error': 'product_id is required'},
+                {'error': 'danawa_product_id is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        trend = prediction_service.get_price_trend(
-            product_id=int(product_id),
+        trend = timer_service.get_price_trend(
+            danawa_product_id=danawa_product_id,
             days=days
         )
         serializer = PriceTrendSerializer(trend)
@@ -210,10 +199,10 @@ class PriceHistoryListCreateView(APIView):
         summary='Get price history',
         parameters=[
             OpenApiParameter(
-                name='product_id',
-                type=int,
+                name='danawa_product_id',
+                type=str,
                 required=True,
-                description='Product ID'
+                description='Danawa Product ID'
             ),
             OpenApiParameter(
                 name='days',
@@ -226,17 +215,17 @@ class PriceHistoryListCreateView(APIView):
     )
     def get(self, request):
         """Get price history for a product."""
-        product_id = request.query_params.get('product_id')
+        danawa_product_id = request.query_params.get('danawa_product_id')
         days = int(request.query_params.get('days', 30))
 
-        if not product_id:
+        if not danawa_product_id:
             return Response(
-                {'error': 'product_id is required'},
+                {'error': 'danawa_product_id is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         history = history_service.get_history_by_product(
-            product_id=int(product_id),
+            danawa_product_id=danawa_product_id,
             days=days
         )
         serializer = PriceHistorySerializer(history, many=True)
@@ -253,7 +242,7 @@ class PriceHistoryListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
 
         history = history_service.create_history(
-            product_id=serializer.validated_data['product_id'],
+            danawa_product_id=serializer.validated_data['danawa_product_id'],
             lowest_price=serializer.validated_data['lowest_price'],
         )
 

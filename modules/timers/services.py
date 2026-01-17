@@ -1,5 +1,5 @@
 """
-Price Prediction business logic services.
+Timers business logic services.
 """
 import logging
 from datetime import datetime, timedelta
@@ -8,7 +8,7 @@ from typing import List, Optional
 from django.db import transaction
 from django.utils import timezone
 
-from .models import PricePredictionModel, PriceHistoryModel
+from .models import TimerModel, PriceHistoryModel
 from .exceptions import (
     PredictionNotFoundError,
     InsufficientHistoryDataError,
@@ -18,78 +18,78 @@ from .exceptions import (
 logger = logging.getLogger(__name__)
 
 
-class PricePredictionService:
-    """Service for price prediction operations."""
+class TimerService:
+    """Service for timer operations."""
 
-    def get_prediction_by_id(self, prediction_id: int) -> Optional[PricePredictionModel]:
-        """Get prediction by ID."""
+    def get_timer_by_id(self, timer_id: int) -> Optional[TimerModel]:
+        """Get timer by ID."""
         try:
-            return PricePredictionModel.objects.get(
-                id=prediction_id,
+            return TimerModel.objects.get(
+                id=timer_id,
                 deleted_at__isnull=True
             )
-        except PricePredictionModel.DoesNotExist:
+        except TimerModel.DoesNotExist:
             return None
 
-    def get_prediction_by_product(
+    def get_timer_by_product(
         self,
-        product_id: int,
+        danawa_product_id: str,
         prediction_date: Optional[datetime] = None
-    ) -> Optional[PricePredictionModel]:
-        """Get latest prediction for a product."""
-        queryset = PricePredictionModel.objects.filter(
-            product_id=product_id,
+    ) -> Optional[TimerModel]:
+        """Get latest timer for a product."""
+        queryset = TimerModel.objects.filter(
+            danawa_product_id=danawa_product_id,
             deleted_at__isnull=True
         )
         if prediction_date:
             queryset = queryset.filter(prediction_date=prediction_date)
         return queryset.order_by('-created_at').first()
 
-    def get_predictions_for_product(
+    def get_timers_for_product(
         self,
-        product_id: int,
+        danawa_product_id: str,
         days: int = 7
-    ) -> List[PricePredictionModel]:
-        """Get predictions for next N days."""
+    ) -> List[TimerModel]:
+        """Get timers for next N days."""
         today = timezone.now()
         end_date = today + timedelta(days=days)
         return list(
-            PricePredictionModel.objects.filter(
-                product_id=product_id,
+            TimerModel.objects.filter(
+                danawa_product_id=danawa_product_id,
                 prediction_date__gte=today,
                 prediction_date__lte=end_date,
                 deleted_at__isnull=True
             ).order_by('prediction_date')
         )
 
-    def get_user_predictions(
+    def get_user_timers(
         self,
         user_id: int,
-        is_active: bool = None,
+        is_notification_enabled: bool = None,
         offset: int = 0,
         limit: int = 20
-    ) -> List[PricePredictionModel]:
-        """Get predictions for a user."""
-        queryset = PricePredictionModel.objects.filter(
+    ) -> List[TimerModel]:
+        """Get timers for a user."""
+        queryset = TimerModel.objects.filter(
             user_id=user_id,
             deleted_at__isnull=True
         )
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active)
+        if is_notification_enabled is not None:
+            queryset = queryset.filter(is_notification_enabled=is_notification_enabled)
         return list(queryset.order_by('-created_at')[offset:offset + limit])
 
     @transaction.atomic
-    def create_prediction(
+    def create_timer(
         self,
-        product_id: int,
+        danawa_product_id: str,
         user_id: int,
         target_price: int,
         prediction_date: datetime,
         model_version: str = 'v1.0'
-    ) -> PricePredictionModel:
-        """Create a new price prediction using AI."""
+    ) -> TimerModel:
+        """Create a new price timer using AI."""
         # Get historical data
-        history = self._get_price_history(product_id)
+        history = self._get_price_history(danawa_product_id)
 
         # Calculate prediction
         predicted_price, confidence, suitability_score, guide_message = self._calculate_prediction(
@@ -98,8 +98,8 @@ class PricePredictionService:
             prediction_date
         )
 
-        prediction = PricePredictionModel.objects.create(
-            product_id=product_id,
+        timer = TimerModel.objects.create(
+            danawa_product_id=danawa_product_id,
             user_id=user_id,
             target_price=target_price,
             predicted_price=predicted_price,
@@ -107,67 +107,67 @@ class PricePredictionService:
             confidence_score=confidence,
             purchase_suitability_score=suitability_score,
             purchase_guide_message=guide_message,
-            is_active=True
+            is_notification_enabled=True
         )
 
         logger.info(
-            f"Created prediction for product {product_id}: "
+            f"Created timer for product {danawa_product_id}: "
             f"{target_price} -> {predicted_price}"
         )
-        return prediction
+        return timer
 
     @transaction.atomic
-    def update_prediction(
+    def update_timer(
         self,
-        prediction_id: int,
-        is_active: bool = None,
-    ) -> PricePredictionModel:
-        """Update a prediction."""
-        prediction = self.get_prediction_by_id(prediction_id)
-        if not prediction:
-            raise PredictionNotFoundError(str(prediction_id))
+        timer_id: int,
+        is_notification_enabled: bool = None,
+    ) -> TimerModel:
+        """Update a timer."""
+        timer = self.get_timer_by_id(timer_id)
+        if not timer:
+            raise PredictionNotFoundError(str(timer_id))
 
-        if is_active is not None:
-            prediction.is_active = is_active
+        if is_notification_enabled is not None:
+            timer.is_notification_enabled = is_notification_enabled
 
-        prediction.save()
-        return prediction
+        timer.save()
+        return timer
 
     @transaction.atomic
-    def delete_prediction(self, prediction_id: int) -> bool:
-        """Soft delete a prediction."""
-        prediction = self.get_prediction_by_id(prediction_id)
-        if not prediction:
+    def delete_timer(self, timer_id: int) -> bool:
+        """Soft delete a timer."""
+        timer = self.get_timer_by_id(timer_id)
+        if not timer:
             return False
 
-        prediction.deleted_at = timezone.now()
-        prediction.is_active = False
-        prediction.save()
+        timer.deleted_at = timezone.now()
+        timer.is_notification_enabled = False
+        timer.save()
         return True
 
     @transaction.atomic
     def record_price_history(
         self,
-        product_id: int,
+        danawa_product_id: str,
         lowest_price: int,
     ) -> PriceHistoryModel:
         """Record a price point for historical tracking."""
         return PriceHistoryModel.objects.create(
-            product_id=product_id,
+            danawa_product_id=danawa_product_id,
             lowest_price=lowest_price,
             recorded_at=timezone.now(),
         )
 
     def get_price_history(
         self,
-        product_id: int,
+        danawa_product_id: str,
         days: int = 30
     ) -> List[PriceHistoryModel]:
         """Get price history for a product."""
         start_date = timezone.now() - timedelta(days=days)
         return list(
             PriceHistoryModel.objects.filter(
-                product_id=product_id,
+                danawa_product_id=danawa_product_id,
                 recorded_at__gte=start_date,
                 deleted_at__isnull=True
             ).order_by('recorded_at')
@@ -175,13 +175,13 @@ class PricePredictionService:
 
     def get_price_trend(
         self,
-        product_id: int,
+        danawa_product_id: str,
         days: int = 30
     ) -> dict:
         """Analyze price trend for a product."""
         start_date = timezone.now() - timedelta(days=days)
         history = PriceHistoryModel.objects.filter(
-            product_id=product_id,
+            danawa_product_id=danawa_product_id,
             recorded_at__gte=start_date,
             deleted_at__isnull=True
         ).order_by('recorded_at')
@@ -217,14 +217,14 @@ class PricePredictionService:
 
     def _get_price_history(
         self,
-        product_id: int,
+        danawa_product_id: str,
         days: int = 30
     ) -> List[PriceHistoryModel]:
         """Get price history for prediction."""
         start_date = timezone.now() - timedelta(days=days)
         return list(
             PriceHistoryModel.objects.filter(
-                product_id=product_id,
+                danawa_product_id=danawa_product_id,
                 recorded_at__gte=start_date,
                 deleted_at__isnull=True
             ).order_by('recorded_at')
@@ -280,14 +280,14 @@ class PriceHistoryService:
 
     def get_history_by_product(
         self,
-        product_id: int,
+        danawa_product_id: str,
         days: int = 30
     ) -> List[PriceHistoryModel]:
         """Get price history for a product."""
         start_date = timezone.now() - timedelta(days=days)
         return list(
             PriceHistoryModel.objects.filter(
-                product_id=product_id,
+                danawa_product_id=danawa_product_id,
                 recorded_at__gte=start_date,
                 deleted_at__isnull=True
             ).order_by('-recorded_at')
@@ -296,12 +296,12 @@ class PriceHistoryService:
     @transaction.atomic
     def create_history(
         self,
-        product_id: int,
+        danawa_product_id: str,
         lowest_price: int,
     ) -> PriceHistoryModel:
         """Create a new price history record."""
         return PriceHistoryModel.objects.create(
-            product_id=product_id,
+            danawa_product_id=danawa_product_id,
             lowest_price=lowest_price,
             recorded_at=timezone.now(),
         )

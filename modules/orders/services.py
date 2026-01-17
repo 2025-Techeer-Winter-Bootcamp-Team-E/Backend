@@ -7,10 +7,11 @@ from typing import Optional, List
 from django.db import transaction
 
 from .models import (
-    StorageModel,
-    PurchaseModel,
-    PurchaseItemModel,
-    TokenHistoryModel,
+    CartModel,
+    CartItemModel,
+    OrderModel,
+    OrderItemModel,
+    OrderHistoryModel,
     ReviewModel,
 )
 from .exceptions import (
@@ -20,172 +21,184 @@ from .exceptions import (
 )
 
 
-class StorageService:
+class CartService:
     """
-    Storage (장바구니) business logic service.
+    Cart (장바구니) business logic service.
     """
 
-    def get_user_storage_items(self, user_id: int) -> List[StorageModel]:
-        """Get all storage items for a user."""
+    def get_or_create_cart(self, user_id: int) -> CartModel:
+        """Get or create cart for a user."""
+        cart, created = CartModel.objects.get_or_create(
+            user_id=user_id,
+            deleted_at__isnull=True
+        )
+        return cart
+
+    def get_cart_items(self, cart_id: int) -> List[CartItemModel]:
+        """Get all items in a cart."""
         return list(
-            StorageModel.objects.filter(user_id=user_id, deleted_at__isnull=True)
-            .select_related('product')
+            CartItemModel.objects.filter(
+                cart_id=cart_id,
+                deleted_at__isnull=True
+            ).select_related('product')
         )
 
     def add_item(
         self,
-        user_id: int,
+        cart_id: int,
         product_id: int,
         quantity: int = 1,
-    ) -> StorageModel:
-        """Add item to storage."""
-        storage_item, created = StorageModel.objects.get_or_create(
-            user_id=user_id,
+    ) -> CartItemModel:
+        """Add item to cart."""
+        cart_item, created = CartItemModel.objects.get_or_create(
+            cart_id=cart_id,
             product_id=product_id,
+            deleted_at__isnull=True,
             defaults={'quantity': quantity}
         )
 
         if not created:
-            storage_item.quantity += quantity
-            storage_item.save()
+            cart_item.quantity += quantity
+            cart_item.save()
 
-        return storage_item
+        return cart_item
 
     def update_item_quantity(
         self,
-        user_id: int,
+        cart_id: int,
         product_id: int,
         quantity: int,
-    ) -> Optional[StorageModel]:
-        """Update storage item quantity."""
+    ) -> Optional[CartItemModel]:
+        """Update cart item quantity."""
         try:
-            storage_item = StorageModel.objects.get(
-                user_id=user_id,
+            cart_item = CartItemModel.objects.get(
+                cart_id=cart_id,
                 product_id=product_id,
                 deleted_at__isnull=True
             )
             if quantity <= 0:
-                storage_item.deleted_at = datetime.now()
-                storage_item.save()
+                cart_item.deleted_at = datetime.now()
+                cart_item.save()
                 return None
             else:
-                storage_item.quantity = quantity
-                storage_item.save()
-                return storage_item
-        except StorageModel.DoesNotExist:
-            raise CartNotFoundError(f"User {user_id}")
+                cart_item.quantity = quantity
+                cart_item.save()
+                return cart_item
+        except CartItemModel.DoesNotExist:
+            raise CartNotFoundError(f"Cart {cart_id}")
 
-    def remove_item(self, user_id: int, product_id: int) -> bool:
-        """Remove item from storage (soft delete)."""
+    def remove_item(self, cart_id: int, product_id: int) -> bool:
+        """Remove item from cart (soft delete)."""
         try:
-            storage_item = StorageModel.objects.get(
-                user_id=user_id,
+            cart_item = CartItemModel.objects.get(
+                cart_id=cart_id,
                 product_id=product_id,
                 deleted_at__isnull=True
             )
-            storage_item.deleted_at = datetime.now()
-            storage_item.save()
+            cart_item.deleted_at = datetime.now()
+            cart_item.save()
             return True
-        except StorageModel.DoesNotExist:
+        except CartItemModel.DoesNotExist:
             return False
 
-    def clear_storage(self, user_id: int) -> bool:
-        """Clear all items from storage (soft delete)."""
-        StorageModel.objects.filter(
-            user_id=user_id,
+    def clear_cart(self, cart_id: int) -> bool:
+        """Clear all items from cart (soft delete)."""
+        CartItemModel.objects.filter(
+            cart_id=cart_id,
             deleted_at__isnull=True
         ).update(deleted_at=datetime.now())
         return True
 
 
-class PurchaseService:
+class OrderService:
     """
-    Purchase business logic service.
+    Order business logic service.
     """
 
     def __init__(self):
-        self.storage_service = StorageService()
+        self.cart_service = CartService()
 
-    def get_purchase_by_id(self, purchase_id: int) -> Optional[PurchaseModel]:
-        """Get purchase by ID."""
+    def get_order_by_id(self, order_id: int) -> Optional[OrderModel]:
+        """Get order by ID."""
         try:
-            return PurchaseModel.objects.prefetch_related('items').get(
-                id=purchase_id,
+            return OrderModel.objects.prefetch_related('items').get(
+                id=order_id,
                 deleted_at__isnull=True
             )
-        except PurchaseModel.DoesNotExist:
+        except OrderModel.DoesNotExist:
             return None
 
-    def get_user_purchases(
+    def get_user_orders(
         self,
         user_id: int,
         offset: int = 0,
         limit: int = 20,
-    ) -> List[PurchaseModel]:
-        """Get all purchases for a user."""
+    ) -> List[OrderModel]:
+        """Get all orders for a user."""
         return list(
-            PurchaseModel.objects.filter(user_id=user_id, deleted_at__isnull=True)
+            OrderModel.objects.filter(user_id=user_id, deleted_at__isnull=True)
             .prefetch_related('items')
             .order_by('-created_at')[offset:offset + limit]
         )
 
     @transaction.atomic
-    def create_purchase_from_storage(self, user_id: int) -> PurchaseModel:
-        """Create purchase from user's storage items."""
-        storage_items = self.storage_service.get_user_storage_items(user_id)
-        if not storage_items:
+    def create_order_from_cart(self, user_id: int) -> OrderModel:
+        """Create order from user's cart items."""
+        cart = self.cart_service.get_or_create_cart(user_id)
+        cart_items = self.cart_service.get_cart_items(cart.id)
+        if not cart_items:
             raise EmptyCartError()
 
-        # Create purchase
-        purchase = PurchaseModel.objects.create(user_id=user_id)
+        # Create order
+        order = OrderModel.objects.create(user_id=user_id)
 
-        # Create purchase items from storage items
-        for storage_item in storage_items:
-            PurchaseItemModel.objects.create(
-                purchase=purchase,
-                product=storage_item.product,
-                quantity=storage_item.quantity,
+        # Create order items from cart items
+        for cart_item in cart_items:
+            # Use the product's danawa_product_id
+            danawa_product_id = cart_item.product.danawa_product_id if cart_item.product else ''
+            OrderItemModel.objects.create(
+                order=order,
+                danawa_product_id=danawa_product_id,
+                quantity=cart_item.quantity,
             )
 
-        # Clear the storage
-        self.storage_service.clear_storage(user_id)
+        # Clear the cart
+        self.cart_service.clear_cart(cart.id)
 
-        return purchase
+        return order
 
 
-class TokenHistoryService:
+class OrderHistoryService:
     """
-    Token history business logic service.
+    Order history business logic service.
     """
 
-    def get_user_token_histories(
+    def get_user_order_histories(
         self,
         user_id: int,
         offset: int = 0,
         limit: int = 20,
-    ) -> List[TokenHistoryModel]:
-        """Get token histories for a user."""
+    ) -> List[OrderHistoryModel]:
+        """Get order histories for a user."""
         return list(
-            TokenHistoryModel.objects.filter(user_id=user_id, deleted_at__isnull=True)
+            OrderHistoryModel.objects.filter(user_id=user_id, deleted_at__isnull=True)
             .order_by('-transaction_at')[offset:offset + limit]
         )
 
-    def create_token_history(
+    def create_order_history(
         self,
         user_id: int,
         transaction_type: str,
         token_change: int,
         token_balance_after: int,
         danawa_product_id: str,
-        token_owner_id: int = None,
-    ) -> TokenHistoryModel:
-        """Create a token history record."""
-        return TokenHistoryModel.objects.create(
+    ) -> OrderHistoryModel:
+        """Create an order history record."""
+        return OrderHistoryModel.objects.create(
             user_id=user_id,
             transaction_type=transaction_type,
             token_change=token_change,
             token_balance_after=token_balance_after,
-            token_owner_id=token_owner_id,
             transaction_at=datetime.now(),
             danawa_product_id=danawa_product_id,
         )
@@ -198,14 +211,16 @@ class ReviewService:
 
     def get_product_reviews(
         self,
-        product_id: int,
+        danawa_product_id: str,
         offset: int = 0,
         limit: int = 20,
     ) -> List[ReviewModel]:
         """Get reviews for a product."""
         return list(
-            ReviewModel.objects.filter(product_id=product_id, deleted_at__isnull=True)
-            .order_by('-created_at')[offset:offset + limit]
+            ReviewModel.objects.filter(
+                danawa_product_id=danawa_product_id,
+                deleted_at__isnull=True
+            ).order_by('-created_at')[offset:offset + limit]
         )
 
     def get_user_reviews(
@@ -222,7 +237,7 @@ class ReviewService:
 
     def create_review(
         self,
-        product_id: int,
+        danawa_product_id: str,
         user_id: int,
         content: str = None,
         rating: int = None,
@@ -231,7 +246,7 @@ class ReviewService:
     ) -> ReviewModel:
         """Create a review."""
         return ReviewModel.objects.create(
-            product_id=product_id,
+            danawa_product_id=danawa_product_id,
             user_id=user_id,
             content=content,
             rating=rating,

@@ -1,22 +1,22 @@
 """
-Price Prediction serializers.
+Timers serializers.
 """
 from rest_framework import serializers
 
-from .models import PricePredictionModel, PriceHistoryModel
+from .models import TimerModel, PriceHistoryModel
 
 
-class PricePredictionSerializer(serializers.ModelSerializer):
-    """Serializer for price prediction."""
+class TimerSerializer(serializers.ModelSerializer):
+    """Serializer for timer."""
 
     price_change = serializers.SerializerMethodField()
     change_percent = serializers.SerializerMethodField()
 
     class Meta:
-        model = PricePredictionModel
+        model = TimerModel
         fields = [
             'id',
-            'product',
+            'danawa_product_id',
             'user',
             'target_price',
             'predicted_price',
@@ -24,7 +24,7 @@ class PricePredictionSerializer(serializers.ModelSerializer):
             'confidence_score',
             'purchase_suitability_score',
             'purchase_guide_message',
-            'is_active',
+            'is_notification_enabled',
             'price_change',
             'change_percent',
             'created_at',
@@ -42,14 +42,16 @@ class PricePredictionSerializer(serializers.ModelSerializer):
         """Calculate percentage change."""
         if not obj.target_price or obj.target_price == 0:
             return 0
+        if not obj.predicted_price:
+            return 0
         change = (obj.predicted_price - obj.target_price) / obj.target_price * 100
         return round(float(change), 2)
 
 
-class PricePredictionCreateSerializer(serializers.Serializer):
-    """Serializer for creating prediction request."""
+class TimerCreateSerializer(serializers.Serializer):
+    """Serializer for creating timer request."""
 
-    product_id = serializers.IntegerField()
+    danawa_product_id = serializers.CharField(max_length=15)
     target_price = serializers.IntegerField(min_value=0)
     prediction_days = serializers.IntegerField(
         min_value=1,
@@ -59,20 +61,20 @@ class PricePredictionCreateSerializer(serializers.Serializer):
     )
 
 
-class PricePredictionListSerializer(serializers.ModelSerializer):
-    """Simplified serializer for prediction list."""
+class TimerListSerializer(serializers.ModelSerializer):
+    """Simplified serializer for timer list."""
 
     class Meta:
-        model = PricePredictionModel
+        model = TimerModel
         fields = [
             'id',
-            'product',
+            'danawa_product_id',
             'target_price',
             'predicted_price',
             'prediction_date',
             'confidence_score',
             'purchase_suitability_score',
-            'is_active',
+            'is_notification_enabled',
             'created_at',
         ]
 
@@ -84,7 +86,7 @@ class PriceHistorySerializer(serializers.ModelSerializer):
         model = PriceHistoryModel
         fields = [
             'id',
-            'product',
+            'danawa_product_id',
             'lowest_price',
             'recorded_at',
             'created_at',
@@ -96,7 +98,7 @@ class PriceHistorySerializer(serializers.ModelSerializer):
 class PriceHistoryCreateSerializer(serializers.Serializer):
     """Serializer for creating price history."""
 
-    product_id = serializers.IntegerField()
+    danawa_product_id = serializers.CharField(max_length=15)
     lowest_price = serializers.IntegerField(min_value=0)
 
 

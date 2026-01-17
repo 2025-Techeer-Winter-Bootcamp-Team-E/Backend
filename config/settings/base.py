@@ -52,7 +52,7 @@ LOCAL_APPS = [
     'modules.orders',
     'modules.categories',
     'modules.search',
-    'modules.price_prediction',
+    'modules.timers',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -185,8 +185,8 @@ SIMPLE_JWT = {
 
 # DRF Spectacular (Swagger) Settings
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'E-commerce Backend API',
-    'DESCRIPTION': 'DDD Architecture based E-commerce Backend API',
+    'TITLE': '컴퓨터 쇼핑 AI에이전트 API',
+    'DESCRIPTION': '컴퓨터 쇼핑 AI에이전트 백엔드 API 문서입니다.',
     'VERSION': '1.0.0',
 
     'SECURITY': [{'BearerAuth': []}],
@@ -205,15 +205,15 @@ SPECTACULAR_SETTINGS = {
     'REDOC_DIST': 'SIDECAR',
     'COMPONENT_SPLIT_REQUEST': True,
     'SCHEMA_PATH_PREFIX': r'/api/v[0-9]',
+    'EXCLUDE_PATH_REGEX': [r'^/api/v1/health/.*$', r'^/api/v1/health/$'],
     'TAGS': [
-        {'name': 'Auth', 'description': 'Authentication endpoints'},
-        {'name': 'Users', 'description': 'User management endpoints'},
-        {'name': 'Products', 'description': 'Product management endpoints'},
-        {'name': 'Orders', 'description': 'Order management endpoints'},
-        {'name': 'Cart', 'description': 'Shopping cart endpoints'},
-        {'name': 'Categories', 'description': 'Category management endpoints'},
-        {'name': 'Search', 'description': 'Search endpoints'},
-        {'name': 'Price Prediction', 'description': 'Price prediction endpoints'},
+        {'name': 'Users', 'description': '회원관리 및 인증 endpoints'},
+        {'name': 'Products', 'description': '상품 관리 endpoints'},
+        {'name': 'Orders', 'description': '주문 관리 endpoints'},
+        {'name': 'Cart', 'description': '장바구니 endpoints'},
+        {'name': 'Categories', 'description': '카테고리 관리 endpoints'},
+        {'name': 'Search', 'description': '검색 endpoints'},
+        {'name': 'Timers', 'description': '가격 타이머 및 알림 endpoints'},
     ],
 }
 
@@ -243,7 +243,7 @@ CELERY_TASK_ROUTES = {
     'modules.orders.tasks.*': {'queue': 'orders'},
     'modules.users.tasks.*': {'queue': 'emails'},
     'modules.search.tasks.*': {'queue': 'default'},
-    'modules.price_prediction.tasks.*': {'queue': 'predictions'},
+    'modules.timers.tasks.*': {'queue': 'predictions'},
     'modules.categories.tasks.*': {'queue': 'default'},
 }
 
