@@ -21,7 +21,9 @@
       "Bash(docker-compose down:*)",
       "Bash(docker compose:*)",
       "Bash(docker exec:*)",
-      "Bash(docker cp:*)"
+      "Bash(docker cp:*)",
+      "Bash(docker volume rm:*)",
+      "Bash(docker rm:*)"
     ]
   }
 }

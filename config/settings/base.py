@@ -52,7 +52,7 @@ LOCAL_APPS = [
     'modules.orders',
     'modules.categories',
     'modules.search',
-    'modules.price_prediction',
+    'modules.timers',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -232,7 +232,7 @@ CELERY_TASK_ROUTES = {
     'modules.orders.tasks.*': {'queue': 'orders'},
     'modules.users.tasks.*': {'queue': 'emails'},
     'modules.search.tasks.*': {'queue': 'default'},
-    'modules.price_prediction.tasks.*': {'queue': 'predictions'},
+    'modules.timers.tasks.*': {'queue': 'predictions'},
     'modules.categories.tasks.*': {'queue': 'default'},
 }
 

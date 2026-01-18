@@ -81,7 +81,7 @@ def crawl_product(danawa_product_id: str) -> dict:
     """
     from .crawlers import DanawaCrawler
     from .models import ProductModel, MallInformationModel
-    from modules.price_prediction.models import PriceHistoryModel
+    from modules.timers.models import PriceHistoryModel
     from modules.orders.models import ReviewModel
     from modules.users.models import UserModel
 
@@ -490,7 +490,7 @@ def record_price_history(product_id: int) -> dict:
         결과 딕셔너리
     """
     from .models import ProductModel
-    from modules.price_prediction.models import PriceHistoryModel
+    from modules.timers.models import PriceHistoryModel
 
     try:
         product = ProductModel.objects.get(id=product_id, deleted_at__isnull=True)
