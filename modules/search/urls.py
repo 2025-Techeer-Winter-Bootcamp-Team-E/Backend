@@ -7,7 +7,9 @@ from .views import (
     SearchHistoryView, 
     RecentViewProductsView, 
     RecentViewProductDeleteView,
-    AutocompleteView
+    AutocompleteView,
+    PopularSearchView,
+    RecentSearchView
 )
 app_name = 'search'
 
@@ -19,4 +21,7 @@ urlpatterns = [
     
     # : 검색어 자동완성 
     path('autocomplete/', AutocompleteView.as_view(), name='autocomplete'),
+    path('popular/', PopularSearchView.as_view(), name='popular-search'),
+
+    path('recent/', RecentSearchView.as_view(), name='search-recent'),
 ]

@@ -95,3 +95,25 @@ class AutocompleteBaseResponseSerializer(serializers.Serializer):
     status = serializers.IntegerField(default=200)
     message = serializers.CharField(default="자동완성 목록 조회 성공")
     data = AutocompleteResponseSerializer()
+
+
+class PopularTermSerializer(serializers.Serializer):
+    rank = serializers.IntegerField()
+    term = serializers.CharField()
+
+class PopularTermsResponseSerializer(serializers.Serializer):
+    status = serializers.IntegerField(default=200)
+    message = serializers.CharField(default="검색어 목록 조회 성공")
+    data = serializers.DictField(
+        child=serializers.ListField(child=PopularTermSerializer())
+    )
+
+class RecentSearchSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    term = serializers.CharField(source='query')  # query 필드를 term으로 매핑
+    searchedAt = serializers.DateTimeField(source='searched_at')  # searched_at을 searchedAt으로 매핑
+
+class RecentSearchResponseSerializer(serializers.Serializer):
+    status = serializers.IntegerField(default=200)
+    message = serializers.CharField(default="검색어 목록 조회 성공")
+    data = serializers.DictField() # {"recent_terms": [...]} 형태

@@ -14,7 +14,10 @@ from .serializers import (
     SearchHistorySerializer,
     RecentViewProductSerializer,
     RecentViewProductCreateSerializer,
-    AutocompleteResponseSerializer
+    AutocompleteResponseSerializer,
+    PopularTermsResponseSerializer,
+    RecentSearchSerializer, 
+    RecentSearchResponseSerializer
 )
 
 class SearchView(APIView):
@@ -24,8 +27,10 @@ class SearchView(APIView):
 
     @extend_schema(
         tags=['Search'],
-        summary='Search products',
-        request=SearchQuerySerializer,
+        summary='상품 검색',
+        request={
+            "application/x-www-form-urlencoded": SearchQuerySerializer,
+        },
         responses={200: SearchResultSerializer},
     )
     def post(self, request):
@@ -45,7 +50,7 @@ class SearchHistoryView(APIView):
 
     @extend_schema(
         tags=['Search'],
-        summary='Get my search history',
+        summary='검색 히스토리 조회',
         parameters=[OpenApiParameter(name='limit', type=int, required=False)],
         responses={200: SearchHistorySerializer(many=True)},
     )
@@ -61,7 +66,7 @@ class RecentViewProductsView(APIView):
 
     @extend_schema(
         tags=['Search'],
-        summary='Get my recent view products',
+        summary='최근 본 상품 목록 조회',
         parameters=[OpenApiParameter(name='limit', type=int, required=False)],
         responses={200: RecentViewProductSerializer(many=True)},
     )
@@ -72,7 +77,7 @@ class RecentViewProductsView(APIView):
 
     @extend_schema(
         tags=['Search'],
-        summary='Record product view',
+        summary='상품 조회 기록 저장',
         request=RecentViewProductCreateSerializer,
         responses={201: RecentViewProductSerializer},
     )
@@ -89,7 +94,7 @@ class RecentViewProductDeleteView(APIView):
     permission_classes = [IsAuthenticated]
     recent_view_service = RecentViewProductService()
 
-    @extend_schema(tags=['Search'], summary='Delete recent view product')
+    @extend_schema(tags=['Search'], summary='최근 본 상품 기록 삭제')
     def delete(self, request, danawa_product_id: str):
         self.recent_view_service.delete_recent_view(user_id=request.user.id, danawa_product_id=danawa_product_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -102,7 +107,7 @@ class AutocompleteView(APIView):
 
     @extend_schema(
         
-        summary='Search autocomplete',
+        summary='검색어 자동 완성',
         parameters=[
             OpenApiParameter(name='keyword', type=str, description='사용자가 입력 중인 검색어', required=True),
         ],
@@ -126,3 +131,53 @@ class AutocompleteView(APIView):
             return Response({
                 "status": 500, "message": "서버 내부 오류가 발생했습니다."
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+@extend_schema(tags=['Search'])
+class PopularSearchView(APIView):
+    """인기 검색어 조회 API - 로그인 없이 누구나 조회 가능"""
+    permission_classes = [AllowAny] # 인증 없이 접근 허용
+    search_service = SearchService()
+
+    @extend_schema(
+        summary="인기 검색어 조회",
+        responses={200: PopularTermsResponseSerializer},
+        # 명시적으로 보안 설정을 비워둡니다 (Swagger에서 자물쇠 아이콘 제거)
+        
+    )
+    def get(self, request):
+        popular_terms = self.search_service.get_popular_terms()
+        
+        return Response({
+            "status": 200,
+            "message": "검색어 목록 조회 성공",
+            "data": {
+                "popular_terms": popular_terms
+            }
+        })
+class RecentSearchView(APIView):
+    """최근 검색어 조회 API - 검색창 드롭다운용 (최근 5개)"""
+    permission_classes = [IsAuthenticated] # [cite: 9]
+    search_service = SearchService()
+
+    @extend_schema(
+        tags=['Search'],
+        summary='최근 검색어 조회 (5개)',
+        responses={200: RecentSearchResponseSerializer}
+    )
+    def get(self, request):
+        # PDF 명세에 따라 5개만 조회 
+        history = self.search_service.get_user_search_history(
+            user_id=request.user.id, 
+            limit=5
+        )
+        
+        # 데이터 형식 맞춤 [cite: 15, 18]
+        serializer = RecentSearchSerializer(history, many=True)
+        
+        return Response({
+            "status": 200,
+            "message": "검색어 목록 조회 성공",
+            "data": {
+                "recent_terms": serializer.data
+            }
+        }, status=status.HTTP_200_OK)
