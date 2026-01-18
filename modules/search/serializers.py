@@ -83,3 +83,15 @@ class RecentViewProductCreateSerializer(serializers.Serializer):
     """Serializer for creating recent view product."""
 
     danawa_product_id = serializers.CharField(max_length=15)
+
+class AutocompleteResponseSerializer(serializers.Serializer):
+    """자동완성 응답을 위한 시리얼라이저"""
+    suggestions = serializers.ListField(
+        child=serializers.CharField(),
+        help_text='추천 검색어 리스트'
+    )
+class AutocompleteBaseResponseSerializer(serializers.Serializer):
+    """명세서 규격에 맞춘 최종 응답 시리얼라이저"""
+    status = serializers.IntegerField(default=200)
+    message = serializers.CharField(default="자동완성 목록 조회 성공")
+    data = AutocompleteResponseSerializer()

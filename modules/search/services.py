@@ -80,7 +80,48 @@ class SearchService:
             ).order_by('-searched_at')[:limit]
         )
 
+    def get_autocomplete_suggestions(self, keyword: str, limit: int = 5) -> List[str]:
+        """
+        사용자가 입력 중인 키워드와 관련된 추천 검색어 리스트를 반환합니다. 
+        """
+        # DB 조회를 주석 처리하고 가짜 데이터를 리턴합니다.
+        # 원래 로직: return Search.objects.filter(query__icontains=keyword)...
+        
+        mock_data = [
+            # '삼성' 관련
+            "삼성전자 DDR5 16GB",
+            "삼성전자 오디세이 G5",
+            "삼성 갤럭시 S24",
+            "갤럭시 S25",
+            # 'RTX' 관련
+            "NVIDIA RTX 4070 SUPER",
+            "NVIDIA RTX 4080",
+            "NVIDIA RTX 4090",
+            # '인텔' 관련
+            "인텔 코어 i7-14700K",
+            "인텔 코어 i9-14900K",
+            # 'LG' 관련
+            "LG 울트라기어 모니터",
+            "LG 그램 16"
+        ]
+        if not keyword or len(keyword) < 2:  # 최소 2자 이상일 때만 검색 (Serializer 기준 준수)
+            return []
 
+        # 1. SearchModel에서 query 필드에 keyword가 포함된 항목 조회
+        # 2. 삭제되지 않은(deleted_at__isnull=True) 항목만 필터링
+        # 3. 중복 제거(distinct) 후 최신순 혹은 알파벳순으로 정렬하여 제한된 개수만큼 반환
+        #suggestions = SearchModel.objects.filter(
+         #   query__icontains=keyword,
+          #  deleted_at__isnull=True
+        #).values_list('query', flat=True).distinct()[:limit]
+        # 4. Mock 데이터에서 키워드가 포함된 것만 필터링해서 반환
+    # C언어의 strstr() 기능과 같습니다.
+        results = [item for item in mock_data if keyword.lower() in item.lower()]
+    
+        # SearchService 내부
+        return {"suggestions": results[:limit]}
+    # return list(suggestions)
+    
 class RecentViewProductService:
     """Service for recent view product operations."""
 
