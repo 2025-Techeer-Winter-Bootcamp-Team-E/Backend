@@ -207,7 +207,8 @@ class OrderHistoryModel(models.Model):
         'users.UserModel',
         on_delete=models.CASCADE,
         related_name='order_histories',
-        verbose_name='회원번호'
+        verbose_name='회원번호',
+        db_column='token_owner_id'
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -224,9 +225,9 @@ class OrderHistoryModel(models.Model):
     )
 
     class Meta:
-        db_table = 'order_histories'
-        verbose_name = 'Order History'
-        verbose_name_plural = 'Order Histories'
+        db_table = 'token_histories'
+        verbose_name = 'token History'
+        verbose_name_plural = 'token Histories'
         ordering = ['-transaction_at']
         indexes = [
             models.Index(fields=['user', 'transaction_at']),

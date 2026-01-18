@@ -97,3 +97,19 @@ class ReviewCreateSerializer(serializers.Serializer):
     rating = serializers.IntegerField(min_value=1, max_value=5, required=False)
     mall_name = serializers.CharField(required=False, allow_blank=True)
     reviewer_name = serializers.CharField(required=False, allow_blank=True)
+
+
+# Token Recharge Serializers
+
+class TokenRechargeSerializer(serializers.Serializer):
+    """Serializer for token recharge request."""
+    recharge_token = serializers.IntegerField(min_value=1)
+
+
+# Token Purchase Serializers
+
+class TokenPurchaseSerializer(serializers.Serializer):
+    """Serializer for token purchase request."""
+    product_id = serializers.IntegerField()
+    quantity = serializers.IntegerField(min_value=1)
+    total_price = serializers.IntegerField(min_value=0)

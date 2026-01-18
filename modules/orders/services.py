@@ -18,6 +18,8 @@ from .exceptions import (
     OrderNotFoundError,
     CartNotFoundError,
     EmptyCartError,
+    InvalidRechargeAmountError,
+    InsufficientTokenBalanceError,
 )
 
 
@@ -202,6 +204,106 @@ class OrderHistoryService:
             transaction_at=datetime.now(),
             danawa_product_id=danawa_product_id,
         )
+
+    @transaction.atomic
+    def recharge_token(self, user_id: int, recharge_amount: int) -> int:
+        """
+        Recharge tokens for a user.
+        
+        Args:
+            user_id: User ID
+            recharge_amount: Amount of tokens to recharge
+            
+        Returns:
+            New token balance after recharge
+            
+        Raises:
+            InvalidRechargeAmountError: If recharge amount is below minimum (1000)
+        """
+        MINIMUM_RECHARGE_AMOUNT = 1000
+        
+        if recharge_amount < MINIMUM_RECHARGE_AMOUNT:
+            raise InvalidRechargeAmountError(MINIMUM_RECHARGE_AMOUNT)
+        
+        # Import UserService here to avoid circular imports
+        from modules.users.services import UserService
+        user_service = UserService()
+        
+        # Update user token balance
+        user = user_service.update_token_balance(user_id, recharge_amount)
+        new_balance = user.token_balance or 0
+        
+        return new_balance
+
+    @transaction.atomic
+    def purchase_with_tokens(
+        self,
+        user_id: int,
+        product_id: int,
+        quantity: int,
+        total_price: int,
+    ) -> tuple[OrderModel, int, 'ProductModel']:
+        """
+        Purchase product using tokens.
+        
+        Args:
+            user_id: User ID
+            product_id: Product ID
+            quantity: Quantity to purchase
+            total_price: Total price in tokens
+            
+        Returns:
+            Tuple of (OrderModel, new_token_balance)
+            
+        Raises:
+            InsufficientTokenBalanceError: If user doesn't have enough tokens
+        """
+        # Import services here to avoid circular imports
+        from modules.users.services import UserService
+        from modules.products.services import ProductService
+        
+        user_service = UserService()
+        product_service = ProductService()
+        
+        # Get user and check token balance
+        user = user_service.get_user_by_id(user_id)
+        if not user:
+            raise OrderNotFoundError(f"User {user_id}")
+        
+        current_balance = user.token_balance or 0
+        if current_balance < total_price:
+            raise InsufficientTokenBalanceError(required=total_price, available=current_balance)
+        
+        # Get product
+        product = product_service.get_product_by_id(product_id)
+        if not product:
+            raise OrderNotFoundError(f"Product {product_id}")
+        
+        # Deduct tokens
+        new_balance = current_balance - total_price
+        user.token_balance = new_balance
+        user.save()
+        
+        # Create order
+        order = OrderModel.objects.create(user_id=user_id)
+        
+        # Create order item
+        OrderItemModel.objects.create(
+            order=order,
+            danawa_product_id=product.danawa_product_id,
+            quantity=quantity,
+        )
+        
+        # Create order history (payment transaction)
+        self.create_order_history(
+            user_id=user_id,
+            transaction_type='payment',
+            token_change=-total_price,  # Negative for payment
+            token_balance_after=new_balance,
+            danawa_product_id=product.danawa_product_id,
+        )
+        
+        return order, new_balance, product
 
 
 class ReviewService:
