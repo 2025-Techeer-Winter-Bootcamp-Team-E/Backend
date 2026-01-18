@@ -1,137 +1,39 @@
-"""
-Users module serializers.
-"""
-import re
 from rest_framework import serializers
-
+from django.contrib.auth import authenticate
 from .models import UserModel
 
-
-
-class UserSerializer(serializers.ModelSerializer):
-    """Serializer for user output."""
-
-    class Meta:
-        model = UserModel
-        fields = [
-            'id',
-            'email',
-            'nickname',
-            'token_balance',
-            'social_provider',
-            'is_active',
-            'created_at',
-            'updated_at',
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
-
-
-class UserCreateSerializer(serializers.Serializer):
-    """Serializer for user registration."""
-
-    email = serializers.EmailField()
-    name = serializers.CharField(min_length=1, max_length=50)
-    nickname = serializers.CharField(min_length=2, max_length=50)
-    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    password = serializers.CharField(min_length=8, write_only=True)
-
-    def validate_email(self, value):
-        """Validate email format."""
-        if not value:
-            raise serializers.ValidationError("이메일은 필수 입력 항목입니다.")
-        return value
-
-    def validate_phone(self, value):
-        """Validate phone number format."""
-        if value:
-            # 전화번호 형식: 010-1234-5678 또는 01012345678
-            phone_pattern = re.compile(r'^01[0-9]-?\d{3,4}-?\d{4}$')
-            if not phone_pattern.match(value):
-                raise serializers.ValidationError("유효하지 않은 전화번호 형식입니다.")
-        return value
-
-
-class UserUpdateSerializer(serializers.Serializer):
-    """Serializer for user profile update."""
-
-    nickname = serializers.CharField(min_length=2, max_length=50, required=False)
-
-
-class LoginSerializer(serializers.Serializer):
-    """Serializer for login request."""
-
-    email = serializers.EmailField()
+# 1. 회원가입 데이터를 담을 그릇(Serializer)의 이름을 정합니다.
+class UserSignupSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
-
-
-class TokenSerializer(serializers.Serializer):
-    """Serializer for token response."""
-
-    access_token = serializers.CharField(read_only=True)
-    refresh_token = serializers.CharField(read_only=True)
-    token_type = serializers.CharField(read_only=True, default="Bearer")
-
-
-class RefreshTokenSerializer(serializers.Serializer):
-    """Serializer for refresh token request."""
-
-    refresh_token = serializers.CharField()
-
-
-class SocialLoginSerializer(serializers.Serializer):
-    """Serializer for social login request."""
-
-    provider = serializers.ChoiceField(choices=['google', 'kakao', 'naver'])
-    social_token = serializers.CharField(write_only=True)
-
-
-class TokenBalanceSerializer(serializers.Serializer):
-    """Serializer for token balance update."""
-
-    amount = serializers.IntegerField()
-
-class PasswordChangeSerializer(serializers.Serializer):
-    current_password = serializers.CharField(write_only=True)
-    new_password = serializers.CharField(write_only=True)
-
-    def validate_new_password(self, value):
-        if len(value) < 8:
-            raise serializers.ValidationError("비밀번호는 8자 이상이어야 합니다.")
+    # 이메일 중복 체크 로직
+    def validate_email(self, value):
+        """이메일이 이미 존재하는지 확인합니다."""
+        if UserModel.objects.filter(email=value).exists():
+            raise serializers.ValidationError("이미 존재하는 이메일입니다.")
         return value
+    
+    class Meta: 
+        model=UserModel 
+        fields=['id', 'email', 'password','nickname','name','phone','created_at']
+        extra_kwargs = {
+            'password': {'write_only': True},
+            'id': {'read_only': True},        # 출력만 하고 입력은 안 받음 (명세서 반영)
+            'created_at': {'read_only': True},
+        }
+
+class UserLoginSerializer(serializers.Serializer):
+    email=serializers.EmailField()
+    password=serializers.CharField(style={'input_type':'password'})
+    
+    def validate(self, data):
+        email=data['email']
+        password=data['password']
+        user=authenticate(username=email,password=password)
+        if user is not None:
+            data['user']=user
+            return data
+        else:
+            raise serializers.ValidationError("이메일 또는 비밀번호가 일치하지 않습니다.")
 
 
-class RecentlyViewedProductSerializer(serializers.Serializer):
-    """Serializer for recently viewed product response."""
-    product_id = serializers.IntegerField()
-    product_name = serializers.CharField()
-    thumbnail_url = serializers.CharField(allow_null=True)
-    viewed_at = serializers.DateTimeField()
-
-
-class WishlistProductSerializer(serializers.Serializer):
-    """Serializer for wishlist product response."""
-    wishlist_id = serializers.IntegerField()
-    product_id = serializers.IntegerField()
-    product_name = serializers.CharField()
-    price = serializers.IntegerField()
-    added_at = serializers.DateTimeField()
-
-
-class CartItemSerializer(serializers.Serializer):
-    """Serializer for cart item response."""
-    cart_item_id = serializers.IntegerField()
-    product_id = serializers.IntegerField()
-    product_name = serializers.CharField()
-    quantity = serializers.IntegerField()
-    price = serializers.IntegerField()
-    total_price = serializers.IntegerField()
-
-
-class PurchaseTimerSerializer(serializers.Serializer):
-    """Serializer for purchase timer response."""
-    timer_id = serializers.IntegerField()
-    product_id = serializers.IntegerField()
-    product_name = serializers.CharField()
-    target_price = serializers.IntegerField()
-    remaining_time = serializers.CharField()
-    is_expired = serializers.BooleanField()
+            
