@@ -12,9 +12,14 @@ class UserSignupSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("이미 존재하는 이메일입니다.")
         return value
     
-    class Meta:
-        model=UserModel
-        fields=['email', 'password','nickname','name','phone']
+    class Meta: 
+        model=UserModel 
+        fields=['id', 'email', 'password','nickname','name','phone','created_at']
+        extra_kwargs = {
+            'password': {'write_only': True},
+            'id': {'read_only': True},        # 출력만 하고 입력은 안 받음 (명세서 반영)
+            'created_at': {'read_only': True},
+        }
 
 class UserLoginSerializer(serializers.Serializer):
     email=serializers.EmailField()
@@ -28,7 +33,7 @@ class UserLoginSerializer(serializers.Serializer):
             data['user']=user
             return data
         else:
-            raise serializers.ValidationError("이메일 또는 비밀번호가 올바르지 않습니다.")
+            raise serializers.ValidationError("이메일 또는 비밀번호가 일치하지 않습니다.")
 
 
             

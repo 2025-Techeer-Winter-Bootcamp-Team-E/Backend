@@ -12,7 +12,7 @@ class UserSignupService:
      
         email = data['email']
         password = data['password']
-        nickname = data['nickname']
+        nickname = data['nickname'] 
         name = data['name']
         phone = data['phone']
 
