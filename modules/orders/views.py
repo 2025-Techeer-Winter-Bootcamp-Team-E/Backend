@@ -156,36 +156,68 @@ class CartItemListCreateView(APIView):
         return Response(CartItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
-@extend_schema(tags=['Cart'])
-class CartItemDetailView(APIView):
-    """Cart item detail endpoint."""
+@extend_schema(tags=['Orders'])
+class CartItemDeleteView(APIView):
+    """Cart item delete endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        request=CartItemUpdateSerializer,
-        responses={200: CartItemSerializer},
-        summary="Update cart item quantity",
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            },
+            404: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
+        summary="Remove item from cart",
+        description="장바구니에서 상품 삭제",
     )
-    def patch(self, request, product_id: int):
-        serializer = CartItemUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        cart = cart_service.get_or_create_cart(request.user.id)
-        item = cart_service.update_item_quantity(
-            cart_id=cart.id,
-            product_id=product_id,
-            quantity=serializer.validated_data['quantity'],
-        )
-
-        if item:
-            return Response(CartItemSerializer(item).data)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @extend_schema(summary="Remove item from cart")
     def delete(self, request, product_id: int):
-        cart = cart_service.get_or_create_cart(request.user.id)
-        cart_service.remove_item(cart.id, product_id)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            cart = cart_service.get_or_create_cart(request.user.id)
+            removed = cart_service.remove_item(cart.id, product_id)
+            
+            if not removed:
+                return Response(
+                    {
+                        'status': 404,
+                        'message': '잘못된 요청이거나 장바구니에 해당 상품이 없습니다.',
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            return Response(
+                {
+                    'status': 200,
+                    'message': '장바구니에서 상품이 삭제되었습니다.',
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"장바구니 삭제 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 @extend_schema(tags=['Order'])
