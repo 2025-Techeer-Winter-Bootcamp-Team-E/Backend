@@ -67,9 +67,9 @@ class UserLoginview(APIView):
             token_data = UserLoginService().get_login_token(user)
             return Response({
                 "status":200,
-                "user_id":user.id,
                 "message":"로그인 성공",
                 "data":{
+                    "user_id":user.id,
                     "access_token":token_data['access'],
                     "refresh_token":token_data['refresh'],
                     "token_type":"Bearer"
