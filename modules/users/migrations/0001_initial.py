@@ -7,9 +7,7 @@ class Migration(migrations.Migration):
 
     initial = True
 
-    dependencies = [
-        ("auth", "0012_alter_user_first_name_max_length"),
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
@@ -30,14 +28,7 @@ class Migration(migrations.Migration):
                         blank=True, null=True, verbose_name="last login"
                     ),
                 ),
-                (
-                    "is_superuser",
-                    models.BooleanField(
-                        default=False,
-                        help_text="Designates that this user has all permissions without explicitly assigning them.",
-                        verbose_name="superuser status",
-                    ),
-                ),
+                ("is_superuser", models.BooleanField(default=False)),
                 (
                     "email",
                     models.EmailField(
@@ -93,28 +84,6 @@ class Migration(migrations.Migration):
                     "deleted_at",
                     models.DateTimeField(
                         blank=True, null=True, verbose_name="논리적삭제플래그"
-                    ),
-                ),
-                (
-                    "groups",
-                    models.ManyToManyField(
-                        blank=True,
-                        help_text="The groups this user belongs to. A user will get all permissions granted to each of their groups.",
-                        related_name="user_set",
-                        related_query_name="user",
-                        to="auth.group",
-                        verbose_name="groups",
-                    ),
-                ),
-                (
-                    "user_permissions",
-                    models.ManyToManyField(
-                        blank=True,
-                        help_text="Specific permissions for this user.",
-                        related_name="user_set",
-                        related_query_name="user",
-                        to="auth.permission",
-                        verbose_name="user permissions",
                     ),
                 ),
             ],

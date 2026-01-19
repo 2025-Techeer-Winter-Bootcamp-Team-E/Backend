@@ -1,7 +1,7 @@
 """
 User Django ORM model.
 """
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.db import models
 
 
@@ -32,7 +32,7 @@ class UserManager(BaseUserManager):
         return self.create_user(email, nickname, password, **extra_fields)
 
 
-class UserModel(AbstractBaseUser, PermissionsMixin):
+class UserModel(AbstractBaseUser):
     """Custom user model based on ERD."""
 
     email = models.EmailField(
@@ -82,6 +82,7 @@ class UserModel(AbstractBaseUser, PermissionsMixin):
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    is_superuser = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -116,3 +117,11 @@ class UserModel(AbstractBaseUser, PermissionsMixin):
     def is_deleted(self) -> bool:
         """Check if user is soft deleted."""
         return self.deleted_at is not None
+
+    def has_perm(self, perm, obj=None):
+        """Check if user has a specific permission."""
+        return self.is_superuser
+
+    def has_module_perms(self, app_label):
+        """Check if user has permissions to view the app."""
+        return self.is_superuser

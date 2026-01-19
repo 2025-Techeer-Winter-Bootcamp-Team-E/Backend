@@ -8,6 +8,7 @@ import logging
 import time
 import random
 import json
+import re
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,6 +16,19 @@ from dateutil.relativedelta import relativedelta
 
 import requests
 from bs4 import BeautifulSoup
+
+# Selenium imports for JavaScript-rendered content
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from webdriver_manager.chrome import ChromeDriverManager
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +67,7 @@ class ProductInfo:
 
     # 리뷰통계
     mall_review_count: int = 0                    # 쇼핑몰리뷰수
+    review_rating: Optional[float] = None         # 평균 별점
 
 
 @dataclass
@@ -218,8 +233,9 @@ class DanawaCrawler:
             detail_page_images = self._parse_detail_page_images(soup, pcode)
             product_description_images = self._parse_product_description_images(soup)
 
-            # 쇼핑몰 리뷰 수
+            # 쇼핑몰 리뷰 수 및 별점
             mall_review_count = self._parse_mall_review_count(soup)
+            review_rating = self._parse_review_rating(soup)
 
             return ProductInfo(
                 pcode=pcode,
@@ -240,6 +256,7 @@ class DanawaCrawler:
                 spec=spec,
                 spec_summary=spec_summary,
                 mall_review_count=mall_review_count,
+                review_rating=review_rating,
             )
 
         except Exception as e:
@@ -533,44 +550,201 @@ class DanawaCrawler:
     def _parse_additional_images(self, soup: BeautifulSoup) -> List[str]:
         """추가 이미지 URL 파싱."""
         images = []
-        img_items = soup.select('.thumb_list img')
-        for img in img_items[:10]:
-            src = img.get('src') or img.get('data-src')
-            if src:
-                url = src if src.startswith('http') else f"https:{src}"
-                images.append(url)
+        # 여러 가능한 선택자 시도
+        selectors = [
+            '.thumb_list img',
+            '.photo_slide li img',
+            '.thumb_slide li img',
+            '.photo_slide_in li img',
+            '.add_thumb_list img',
+        ]
+        for selector in selectors:
+            img_items = soup.select(selector)
+            for img in img_items[:10]:
+                src = img.get('src') or img.get('data-src')
+                if src:
+                    url = src if src.startswith('http') else f"https:{src}"
+                    if url not in images:
+                        images.append(url)
+            if images:
+                break
         return images
 
     def _parse_detail_page_images(self, soup: BeautifulSoup, pcode: str) -> List[str]:
-        """상세페이지 이미지 URL 파싱 (AJAX 필요할 수 있음)."""
+        """상세페이지 이미지 URL 파싱."""
         images = []
-        detail_imgs = soup.select('.detail_cont img')
-        for img in detail_imgs:
-            src = img.get('src') or img.get('data-src')
-            if src:
-                url = src if src.startswith('http') else f"https:{src}"
-                images.append(url)
+        # 여러 가능한 선택자 시도
+        selectors = [
+            '.detail_cont img',
+            '#detail_info img',
+            '.detail_img img',
+            '.prod_detail img',
+        ]
+        for selector in selectors:
+            detail_imgs = soup.select(selector)
+            for img in detail_imgs[:20]:
+                src = img.get('src') or img.get('data-src')
+                if src:
+                    url = src if src.startswith('http') else f"https:{src}"
+                    if url not in images:
+                        images.append(url)
         return images
 
     def _parse_product_description_images(self, soup: BeautifulSoup) -> List[str]:
         """제품설명 이미지 URL 파싱."""
         images = []
-        desc_imgs = soup.select('.prod_desc img')
-        for img in desc_imgs:
-            src = img.get('src') or img.get('data-src')
-            if src:
-                url = src if src.startswith('http') else f"https:{src}"
-                images.append(url)
+        # 여러 가능한 선택자 시도
+        selectors = [
+            '.prod_desc img',
+            '.prod_info_wrap img',
+            '.prod_info img',
+        ]
+        for selector in selectors:
+            desc_imgs = soup.select(selector)
+            for img in desc_imgs[:10]:
+                src = img.get('src') or img.get('data-src')
+                if src:
+                    url = src if src.startswith('http') else f"https:{src}"
+                    if url not in images:
+                        images.append(url)
         return images
 
+    def get_product_images_with_selenium(self, pcode: str) -> Dict[str, Any]:
+        """
+        Selenium을 사용하여 상품 이미지 크롤링.
+
+        Args:
+            pcode: 다나와 상품 코드
+
+        Returns:
+            이미지 딕셔너리 {
+                'main_image': str,
+                'additional_images': List[str],
+                'detail_images': List[str],
+                'description_images': List[str],
+            }
+        """
+        if not SELENIUM_AVAILABLE:
+            logger.warning("Selenium not available")
+            return {}
+
+        import os
+        result = {
+            'main_image': None,
+            'additional_images': [],
+            'detail_images': [],
+            'description_images': [],
+        }
+        driver = None
+
+        try:
+            options = Options()
+            options.add_argument('--headless')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+
+            chrome_bin = os.environ.get('CHROME_BIN')
+            chromedriver_path = os.environ.get('CHROMEDRIVER_PATH')
+
+            if chrome_bin and os.path.exists(chrome_bin):
+                options.binary_location = chrome_bin
+
+            if chromedriver_path and os.path.exists(chromedriver_path):
+                service = Service(chromedriver_path)
+            else:
+                service = Service(ChromeDriverManager().install())
+
+            driver = webdriver.Chrome(service=service, options=options)
+
+            url = f'{self.BASE_URL}/info/?pcode={pcode}'
+            driver.get(url)
+            time.sleep(3)
+
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+            # 대표 이미지
+            main_img = soup.select_one('.photo_w img, #imgView img')
+            if main_img:
+                src = main_img.get('src') or main_img.get('data-src')
+                if src:
+                    result['main_image'] = src if src.startswith('http') else f"https:{src}"
+
+            # 추가 이미지 (썸네일)
+            result['additional_images'] = self._parse_additional_images(soup)
+
+            # 상세 이미지
+            result['detail_images'] = self._parse_detail_page_images(soup, pcode)
+
+            # 제품설명 이미지
+            result['description_images'] = self._parse_product_description_images(soup)
+
+            logger.info(f"Crawled images for {pcode}: main={bool(result['main_image'])}, "
+                       f"additional={len(result['additional_images'])}, "
+                       f"detail={len(result['detail_images'])}")
+
+        except Exception as e:
+            logger.error(f"Failed to crawl images with Selenium for {pcode}: {e}")
+
+        finally:
+            if driver:
+                driver.quit()
+
+        return result
+
     def _parse_mall_review_count(self, soup: BeautifulSoup) -> int:
-        """쇼핑몰 리뷰 수 파싱."""
-        count_elem = soup.select_one('.mall_review_count')
-        if count_elem:
-            text = count_elem.get_text(strip=True).replace(',', '')
-            if text.isdigit():
-                return int(text)
-        return 0
+        """쇼핑몰 리뷰 수 파싱 (JSON-LD에서 추출)."""
+        review_count, _ = self._parse_review_data(soup)
+        return review_count
+
+    def _parse_review_rating(self, soup: BeautifulSoup) -> Optional[float]:
+        """리뷰 평균 별점 파싱 (JSON-LD에서 추출)."""
+        _, rating = self._parse_review_data(soup)
+        return rating
+
+    def _parse_review_data(self, soup: BeautifulSoup) -> tuple:
+        """JSON-LD에서 리뷰 수와 별점 추출."""
+        import re
+
+        review_count = 0
+        review_rating = None
+
+        # JSON-LD 스크립트 태그 찾기
+        script_tags = soup.select('script[type="application/ld+json"]')
+        for script in script_tags:
+            try:
+                data = json.loads(script.string)
+                # AggregateRating 찾기
+                if isinstance(data, dict):
+                    if data.get('@type') == 'AggregateRating':
+                        review_count = int(data.get('reviewCount', 0))
+                        rating_val = data.get('ratingValue')
+                        if rating_val:
+                            review_rating = float(rating_val)
+                    elif 'aggregateRating' in data:
+                        agg = data['aggregateRating']
+                        review_count = int(agg.get('reviewCount', 0))
+                        rating_val = agg.get('ratingValue')
+                        if rating_val:
+                            review_rating = float(rating_val)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                continue
+
+        # JSON-LD에서 못 찾으면 HTML에서 정규식으로 추출
+        if review_count == 0:
+            html_text = str(soup)
+            # "reviewCount": "7642" 패턴
+            match = re.search(r'"reviewCount"[:\s]*"?(\d+)"?', html_text)
+            if match:
+                review_count = int(match.group(1))
+
+            # "ratingValue": "4.7" 패턴
+            match = re.search(r'"ratingValue"[:\s]*"?([\d.]+)"?', html_text)
+            if match:
+                review_rating = float(match.group(1))
+
+        return review_count, review_rating
 
     # ============================================================
     # 판매처 정보 크롤링
@@ -578,7 +752,9 @@ class DanawaCrawler:
 
     def get_mall_prices(self, pcode: str) -> List[MallInfo]:
         """
-        쇼핑몰별 가격 정보 크롤링.
+        쇼핑몰별 가격 정보 크롤링 (requests 기반).
+        페이지 구조 변경으로 동작하지 않을 수 있음.
+        get_mall_prices_with_selenium() 사용 권장.
 
         Args:
             pcode: 다나와 상품 코드
@@ -595,30 +771,28 @@ class DanawaCrawler:
         mall_list = []
 
         try:
-            mall_items = soup.select('.mall_list tbody tr')
+            # 새 페이지 구조: #blog_content .diff_item
+            mall_items = soup.select('#blog_content .diff_item')
 
             for item in mall_items:
-                # 판매처명
-                name_elem = item.select_one('.mall_name')
-                seller_name = name_elem.get_text(strip=True) if name_elem else None
+                # 판매처명 및 로고
+                mall_img = item.select_one('.d_mall img')
+                seller_name = mall_img.get('alt') if mall_img else None
+                seller_logo = None
+                if mall_img:
+                    src = mall_img.get('src')
+                    seller_logo = f"https:{src}" if src and src.startswith('//') else src
 
-                # 가격
-                price_elem = item.select_one('.price_sect .price')
+                # 가격 - .prc_line .price em.prc_c
                 price = 0
+                price_elem = item.select_one('.prc_line .price em.prc_c, .prc_line em.prc_c')
                 if price_elem:
                     price_text = price_elem.get_text(strip=True).replace(',', '').replace('원', '')
                     price = int(price_text) if price_text.isdigit() else 0
 
                 # 판매페이지 URL
-                link_elem = item.select_one('a.mall_link')
+                link_elem = item.select_one('a.link, a.priceCompareBuyLink')
                 seller_url = link_elem.get('href') if link_elem else None
-
-                # 판매처 로고
-                logo_elem = item.select_one('.mall_logo img')
-                seller_logo = None
-                if logo_elem:
-                    src = logo_elem.get('src')
-                    seller_logo = src if src and src.startswith('http') else f"https:{src}" if src else None
 
                 if seller_name and price > 0:
                     mall_list.append(MallInfo(
@@ -633,6 +807,101 @@ class DanawaCrawler:
 
         except Exception as e:
             logger.error(f"Failed to parse mall prices for {pcode}: {e}")
+
+        return mall_list
+
+    def get_mall_prices_with_selenium(self, pcode: str, limit: int = 20) -> List[MallInfo]:
+        """
+        Selenium을 사용하여 쇼핑몰별 가격 정보 크롤링.
+
+        Args:
+            pcode: 다나와 상품 코드
+            limit: 최대 판매처 수
+
+        Returns:
+            MallInfo 리스트
+        """
+        if not SELENIUM_AVAILABLE:
+            logger.warning("Selenium not available")
+            return []
+
+        import os
+        mall_list = []
+        driver = None
+
+        try:
+            options = Options()
+            options.add_argument('--headless')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+
+            chrome_bin = os.environ.get('CHROME_BIN')
+            chromedriver_path = os.environ.get('CHROMEDRIVER_PATH')
+
+            if chrome_bin and os.path.exists(chrome_bin):
+                options.binary_location = chrome_bin
+
+            if chromedriver_path and os.path.exists(chromedriver_path):
+                service = Service(chromedriver_path)
+            else:
+                service = Service(ChromeDriverManager().install())
+
+            driver = webdriver.Chrome(service=service, options=options)
+
+            url = f'{self.BASE_URL}/info/?pcode={pcode}'
+            driver.get(url)
+            time.sleep(3)
+
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+            # 쇼핑몰 정보 파싱
+            mall_items = soup.select('#blog_content .diff_item')[:limit]
+
+            for item in mall_items:
+                try:
+                    # 판매처명 및 로고
+                    mall_img = item.select_one('.d_mall img')
+                    seller_name = mall_img.get('alt') if mall_img else None
+                    seller_logo = None
+                    if mall_img:
+                        src = mall_img.get('src')
+                        seller_logo = f"https:{src}" if src and src.startswith('//') else src
+
+                    # 가격 - .prc_line .price em.prc_c
+                    price = 0
+                    price_elem = item.select_one('.prc_line .price em.prc_c, .prc_line em.prc_c')
+                    if price_elem:
+                        price_text = price_elem.get_text(strip=True).replace(',', '').replace('원', '')
+                        price = int(price_text) if price_text.isdigit() else 0
+
+                    # 판매페이지 URL
+                    link_elem = item.select_one('a.link, a.priceCompareBuyLink')
+                    seller_url = link_elem.get('href') if link_elem else None
+
+                    if seller_name and price > 0:
+                        mall_list.append(MallInfo(
+                            mall_name=seller_name,
+                            price=price,
+                            product_url=seller_url,
+                            logo_url=seller_logo,
+                            seller_name=seller_name,
+                            seller_url=seller_url,
+                            seller_logo=seller_logo,
+                        ))
+                except Exception as e:
+                    logger.warning(f"Failed to parse mall item: {e}")
+                    continue
+
+            logger.info(f"Crawled {len(mall_list)} mall prices for product {pcode}")
+
+        except Exception as e:
+            logger.error(f"Failed to crawl mall prices with Selenium for {pcode}: {e}")
+
+        finally:
+            if driver:
+                driver.quit()
 
         return mall_list
 
@@ -828,6 +1097,146 @@ class DanawaCrawler:
 
         return reviews
 
+    def get_reviews_with_selenium(self, pcode: str, limit: int = 50) -> List[ReviewInfo]:
+        """
+        Selenium을 사용하여 다나와 개별 리뷰 크롤링.
+
+        다나와 리뷰는 JavaScript로 동적 로드되므로 Selenium이 필요합니다.
+
+        Args:
+            pcode: 다나와 상품 코드
+            limit: 최대 리뷰 수
+
+        Returns:
+            ReviewInfo 리스트
+        """
+        if not SELENIUM_AVAILABLE:
+            logger.warning("Selenium not available. Install with: pip install selenium webdriver-manager")
+            return []
+
+        import os
+        reviews = []
+        driver = None
+
+        try:
+            # Chrome 옵션 설정 (Headless 모드)
+            options = Options()
+            options.add_argument('--headless')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+            # Docker 환경에서는 시스템 Chromium 사용
+            chrome_bin = os.environ.get('CHROME_BIN')
+            chromedriver_path = os.environ.get('CHROMEDRIVER_PATH')
+
+            if chrome_bin and os.path.exists(chrome_bin):
+                options.binary_location = chrome_bin
+
+            if chromedriver_path and os.path.exists(chromedriver_path):
+                service = Service(chromedriver_path)
+            else:
+                # 로컬 환경에서는 webdriver-manager 사용
+                service = Service(ChromeDriverManager().install())
+
+            driver = webdriver.Chrome(service=service, options=options)
+
+            # 상품 페이지 로드
+            url = f'{self.BASE_URL}/info/?pcode={pcode}'
+            driver.get(url)
+            time.sleep(3)
+
+            # 쇼핑몰 리뷰 탭 클릭
+            try:
+                review_tab = driver.find_element(
+                    By.ID, 'danawa-prodBlog-productOpinion-button-tab-companyReview'
+                )
+                driver.execute_script('arguments[0].click();', review_tab)
+                time.sleep(3)
+            except Exception as e:
+                logger.warning(f"Could not click review tab: {e}")
+                # 탭이 없을 경우 기본 페이지에서 리뷰 찾기
+
+            # 페이지 소스 파싱
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+            # 리뷰 아이템 파싱 (.rvw_list > li)
+            review_items = soup.select('.rvw_list > li')[:limit]
+
+            for item in review_items:
+                try:
+                    # 평점 (width % / 20 = 5점 만점 평점)
+                    rating = None
+                    star_mask = item.select_one('.star_mask')
+                    if star_mask:
+                        style = star_mask.get('style', '')
+                        width_match = re.search(r'width:\s*(\d+)%', style)
+                        if width_match:
+                            rating = int(width_match.group(1)) // 20
+
+                    # 쇼핑몰명
+                    mall = item.select_one('.mall img')
+                    shop_name = mall.get('alt') if mall else None
+
+                    # 리뷰 날짜
+                    date_elem = item.select_one('.date')
+                    review_date = date_elem.get_text(strip=True) if date_elem else None
+
+                    # 작성자
+                    name_elem = item.select_one('.name')
+                    reviewer_name = name_elem.get_text(strip=True) if name_elem else None
+
+                    # 제목
+                    title_elem = item.select_one('.tit')
+                    title = title_elem.get_text(strip=True) if title_elem else ''
+
+                    # 내용
+                    content_elem = item.select_one('.atc')
+                    content = content_elem.get_text(strip=True) if content_elem else ''
+
+                    # 제목과 내용 결합
+                    full_content = f"{title}\n\n{content}" if title and content else (title or content)
+
+                    # 이미지 목록
+                    review_images = []
+                    images = item.select('.pto_thumb img, .pto_list img')
+                    for img in images:
+                        src = img.get('src')
+                        if src:
+                            # URL 정규화
+                            if src.startswith('//'):
+                                src = f'https:{src}'
+                            elif not src.startswith('http'):
+                                src = f'https://img.danawa.com{src}'
+                            review_images.append(src)
+
+                    reviews.append(ReviewInfo(
+                        shop_name=shop_name,
+                        reviewer_name=reviewer_name,
+                        reviewer=reviewer_name,
+                        rating=rating,
+                        review_date=review_date,
+                        content=full_content,
+                        review_images=review_images,
+                    ))
+
+                except Exception as e:
+                    logger.warning(f"Failed to parse review item: {e}")
+                    continue
+
+            logger.info(f"Crawled {len(reviews)} reviews for product {pcode} using Selenium")
+
+        except Exception as e:
+            logger.error(f"Failed to crawl reviews with Selenium for {pcode}: {e}")
+
+        finally:
+            if driver:
+                driver.quit()
+
+        return reviews
+
     # ============================================================
     # 검색 기능
     # ============================================================
@@ -909,12 +1318,15 @@ class DanawaCrawler:
     # 전체 상품 데이터 크롤링 (통합)
     # ============================================================
 
-    def crawl_full_product_data(self, pcode: str) -> Optional[Dict[str, Any]]:
+    def crawl_full_product_data(
+        self, pcode: str, use_selenium_reviews: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
         상품의 모든 데이터를 한 번에 크롤링.
 
         Args:
             pcode: 다나와 상품 코드
+            use_selenium_reviews: True면 Selenium으로 개별 리뷰 크롤링
 
         Returns:
             전체 상품 데이터 딕셔너리
@@ -933,7 +1345,10 @@ class DanawaCrawler:
         price_history = self.get_price_history(pcode)
 
         # 4. 리뷰
-        reviews = self.get_reviews(pcode)
+        if use_selenium_reviews and SELENIUM_AVAILABLE:
+            reviews = self.get_reviews_with_selenium(pcode)
+        else:
+            reviews = self.get_reviews(pcode)
 
         return {
             'product': product_info,
