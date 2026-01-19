@@ -34,6 +34,12 @@ class UserLoginSerializer(serializers.Serializer):
             return data
         else:
             raise serializers.ValidationError("이메일 또는 비밀번호가 일치하지 않습니다.")
+        
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserModel
+        # 명세서 Response Body의 data 안에 있는 필드들과 일치시킵니다.
+        fields = ['name', 'email', 'nickname', 'phone']
 
 
             
