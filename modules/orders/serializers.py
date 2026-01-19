@@ -113,3 +113,17 @@ class TokenPurchaseSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
     quantity = serializers.IntegerField(min_value=1)
     total_price = serializers.IntegerField(min_value=0)
+
+
+# Cart Payment Serializers
+
+class CartItemPaymentSerializer(serializers.Serializer):
+    """Serializer for cart item in payment request."""
+    cart_item_id = serializers.IntegerField()
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class CartPaymentSerializer(serializers.Serializer):
+    """Serializer for cart payment request."""
+    items = CartItemPaymentSerializer(many=True)
+    total_price = serializers.IntegerField(min_value=0)
