@@ -40,7 +40,7 @@ review_service = ReviewService()
 class CartItemListCreateView(APIView):
     """Cart item list and create endpoint."""
     permission_classes = [IsAuthenticated]
-
+    
     @extend_schema(
         responses={
             200: {
@@ -139,22 +139,112 @@ class CartItemListCreateView(APIView):
 
     @extend_schema(
         request=CartItemCreateSerializer,
-        responses={201: CartItemSerializer},
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'object',
+                        'properties': {
+                            'cart_item_id': {'type': 'integer'},
+                            'product_id': {'type': 'integer'},
+                            'quantity': {'type': 'integer'},
+                            'added_at': {'type': 'string'},
+                        }
+                    }
+                },
+                'example': {
+                    'status': 200,
+                    'message': '장바구니에 상품을 담았습니다.',
+                    'data': {
+                        'cart_item_id': 1006,
+                        'product_id': 702,
+                        'quantity': 2,
+                        'added_at': '2026-01-17T13:54:06'
+                    }
+                }
+            },
+            404: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 404,
+                    'message': '해당 상품을 찾을 수 없습니다.'
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.'
+                }
+            }
+        },
         summary="Add item to cart",
+        description="장바구니에 상품 추가",
     )
     def post(self, request):
-        serializer = CartItemCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer = CartItemCreateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
 
-        data = serializer.validated_data
-        cart = cart_service.get_or_create_cart(request.user.id)
-        item = cart_service.add_item(
-            cart_id=cart.id,
-            product_id=data['product_id'],
-            quantity=data['quantity'],
-        )
+            data = serializer.validated_data
+            product_id = data['product_id']
+            quantity = data['quantity']
 
-        return Response(CartItemSerializer(item).data, status=status.HTTP_201_CREATED)
+            # Check if product exists
+            from modules.products.models import ProductModel
+            try:
+                product = ProductModel.objects.get(id=product_id, deleted_at__isnull=True)
+            except ProductModel.DoesNotExist:
+                return Response(
+                    {
+                        'status': 404,
+                        'message': '해당 상품을 찾을 수 없습니다.',
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            cart = cart_service.get_or_create_cart(request.user.id)
+            item = cart_service.add_item(
+                cart_id=cart.id,
+                product_id=product_id,
+                quantity=quantity,
+            )
+
+            added_at = item.created_at.isoformat() if item.created_at else datetime.now().isoformat()
+
+            return Response(
+                {
+                    'status': 200,
+                    'message': '장바구니에 상품을 담았습니다.',
+                    'data': {
+                        'cart_item_id': item.id,
+                        'product_id': product_id,
+                        'quantity': item.quantity,
+                        'added_at': added_at,
+                    }
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"장바구니에 상품 추가 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 @extend_schema(tags=['Orders'])
@@ -169,13 +259,21 @@ class CartItemDeleteView(APIView):
                 'properties': {
                     'status': {'type': 'integer'},
                     'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 200,
+                    'message': '장바구니 항목이 삭제되었습니다.'
                 }
             },
-            404: {
+            400: {
                 'type': 'object',
                 'properties': {
                     'status': {'type': 'integer'},
                     'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 400,
+                    'message': '잘못된 요청이거나 본인의 장바구니 항목이 아닙니다.'
                 }
             },
             500: {
@@ -183,6 +281,10 @@ class CartItemDeleteView(APIView):
                 'properties': {
                     'status': {'type': 'integer'},
                     'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.'
                 }
             }
         },
@@ -197,16 +299,16 @@ class CartItemDeleteView(APIView):
             if not removed:
                 return Response(
                     {
-                        'status': 404,
+                        'status': 400,
                         'message': '잘못된 요청이거나 장바구니에 해당 상품이 없습니다.',
                     },
-                    status=status.HTTP_404_NOT_FOUND
+                    status=status.HTTP_400_NOT_FOUND    
                 )
             
             return Response(
                 {
                     'status': 200,
-                    'message': '장바구니에서 상품이 삭제되었습니다.',
+                    'message': '장바구니에서 항목이 삭제되었습니다.',
                 },
                 status=status.HTTP_200_OK
             )
@@ -322,18 +424,10 @@ class CartPaymentView(APIView):
                         'order_items': order_items,
                         'total_price': total_price,
                         'current_tokens': new_balance,
-                        'order_status': 'sucess',
+                        'order_status': 'success',
                     }
                 },
                 status=status.HTTP_201_CREATED
-            )
-        except InsufficientTokenBalanceError as e:
-            return Response(
-                {
-                    'status': 402,
-                    'message': '토큰 잔액이 부족합니다.',
-                },
-                status=402  # Payment Required
             )
         except OrderNotFoundError as e:
             return Response(
@@ -353,110 +447,6 @@ class CartPaymentView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
-@extend_schema(tags=['Order'])
-class OrderListCreateView(APIView):
-    """Order list and create endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: OrderSerializer(many=True)},
-        summary="List user's orders",
-    )
-    def get(self, request):
-        orders = order_service.get_user_orders(request.user.id)
-        return Response(OrderSerializer(orders, many=True).data)
-
-    @extend_schema(
-        responses={201: OrderSerializer},
-        summary="Create order from cart",
-    )
-    def post(self, request):
-        order = order_service.create_order_from_cart(request.user.id)
-        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
-
-
-@extend_schema(tags=['Order'])
-class OrderDetailView(APIView):
-    """Order detail endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: OrderSerializer},
-        summary="Get order detail",
-    )
-    def get(self, request, order_id: int):
-        order = order_service.get_order_by_id(order_id)
-        if not order:
-            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        if order.user_id != request.user.id:
-            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        return Response(OrderSerializer(order).data)
-
-
-@extend_schema(tags=['Order History'])
-class OrderHistoryListView(APIView):
-    """Order history list endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: OrderHistorySerializer(many=True)},
-        summary="List user's order histories",
-    )
-    def get(self, request):
-        histories = order_history_service.get_user_order_histories(request.user.id)
-        return Response(OrderHistorySerializer(histories, many=True).data)
-
-
-@extend_schema(tags=['Review'])
-class ReviewListCreateView(APIView):
-    """Review list and create endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: ReviewSerializer(many=True)},
-        summary="List user's reviews",
-    )
-    def get(self, request):
-        reviews = review_service.get_user_reviews(request.user.id)
-        return Response(ReviewSerializer(reviews, many=True).data)
-
-    @extend_schema(
-        request=ReviewCreateSerializer,
-        responses={201: ReviewSerializer},
-        summary="Create a review",
-    )
-    def post(self, request):
-        serializer = ReviewCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        data = serializer.validated_data
-        review = review_service.create_review(
-            danawa_product_id=data['danawa_product_id'],
-            user_id=request.user.id,
-            content=data.get('content'),
-            rating=data.get('rating'),
-            mall_name=data.get('mall_name'),
-            reviewer_name=data.get('reviewer_name'),
-        )
-
-        return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
-
-
-@extend_schema(tags=['Review'])
-class ProductReviewListView(APIView):
-    """Product review list endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: ReviewSerializer(many=True)},
-        summary="List product reviews",
-    )
-    def get(self, request, danawa_product_id: str):
-        reviews = review_service.get_product_reviews(danawa_product_id)
-        return Response(ReviewSerializer(reviews, many=True).data)
 
 
 @extend_schema(tags=['Orders'])
@@ -492,6 +482,10 @@ class TokenRechargeView(APIView):
                 'properties': {
                     'status': {'type': 'integer'},
                     'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 401,
+                    'message': '로그인이 필요합니다.'
                 }
             }
         },
@@ -549,16 +543,15 @@ class TokenBalanceView(APIView):
     @extend_schema(
         responses={
             200: {
-                'type': 'object',
-                'properties': {
-                    'status': {'type': 'integer'},
-                    'message': {'type': 'string'},
-                    'data': {
-                        'type': 'object',
-                        'properties': {
-                            'current_tokens': {'type': 'integer'},
-                        }
+                
+                
+                'status': {'type': 'integer'},
+                'data': {
+                    'type': 'object',
+                    'properties': {
+                    'current_tokens': {'type': 'integer'},
                     }
+                    
                 }
             },
             401: {
@@ -585,7 +578,6 @@ class TokenBalanceView(APIView):
         return Response(
             {
                 'status': 200,
-                'message': '토큰 잔액 조회가 완료되었습니다.',
                 'data': {
                     'current_tokens': current_balance,
                 }
@@ -699,11 +691,3 @@ class TokenPurchaseView(APIView):
                     },
                     status=status.HTTP_404_NOT_FOUND
                 )
-            # For other OrderNotFoundError cases
-            return Response(
-                {
-                    'status': 404,
-                    'message': str(e.message),
-                },
-                status=status.HTTP_404_NOT_FOUND
-            )
