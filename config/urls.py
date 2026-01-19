@@ -30,7 +30,6 @@ urlpatterns = [
     path('api/v1/categories/', include('modules.categories.urls')),
     path('api/v1/search/', include('modules.search.urls')),
     path('api/v1/timers/', include('modules.timers.urls')),
-
     # Health check
     path('api/v1/health/', include('shared.health.urls')),
 ]

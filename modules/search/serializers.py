@@ -83,3 +83,37 @@ class RecentViewProductCreateSerializer(serializers.Serializer):
     """Serializer for creating recent view product."""
 
     danawa_product_id = serializers.CharField(max_length=15)
+
+class AutocompleteResponseSerializer(serializers.Serializer):
+    """자동완성 응답을 위한 시리얼라이저"""
+    suggestions = serializers.ListField(
+        child=serializers.CharField(),
+        help_text='추천 검색어 리스트'
+    )
+class AutocompleteBaseResponseSerializer(serializers.Serializer):
+    """명세서 규격에 맞춘 최종 응답 시리얼라이저"""
+    status = serializers.IntegerField(default=200)
+    message = serializers.CharField(default="자동완성 목록 조회 성공")
+    data = AutocompleteResponseSerializer()
+
+
+class PopularTermSerializer(serializers.Serializer):
+    rank = serializers.IntegerField()
+    term = serializers.CharField()
+
+class PopularTermsResponseSerializer(serializers.Serializer):
+    status = serializers.IntegerField(default=200)
+    message = serializers.CharField(default="검색어 목록 조회 성공")
+    data = serializers.DictField(
+        child=serializers.ListField(child=PopularTermSerializer())
+    )
+
+class RecentSearchSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    term = serializers.CharField(source='query')  # query 필드를 term으로 매핑
+    searchedAt = serializers.DateTimeField(source='searched_at')  # searched_at을 searchedAt으로 매핑
+
+class RecentSearchResponseSerializer(serializers.Serializer):
+    status = serializers.IntegerField(default=200)
+    message = serializers.CharField(default="검색어 목록 조회 성공")
+    data = serializers.DictField() # {"recent_terms": [...]} 형태
