@@ -21,6 +21,7 @@ from .serializers import (
     ReviewCreateSerializer,
     TokenRechargeSerializer,
     TokenPurchaseSerializer,
+    CartPaymentSerializer,
 )
 from .exceptions import InvalidRechargeAmountError, InsufficientTokenBalanceError, OrderNotFoundError
 from modules.products.exceptions import ProductNotFoundError
@@ -215,6 +216,139 @@ class CartItemDeleteView(APIView):
                 {
                     'status': 500,
                     'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+@extend_schema(tags=['Orders'])
+class CartPaymentView(APIView):
+    """Cart payment endpoint."""
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=CartPaymentSerializer,
+        responses={
+            201: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'object',
+                        'properties': {
+                            'order_id': {'type': 'string'},
+                            'order_items': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'cart_item_id': {'type': 'integer'},
+                                        'quantity': {'type': 'integer'},
+                                    }
+                                }
+                            },
+                            'total_price': {'type': 'integer'},
+                            'current_tokens': {'type': 'integer'},
+                            'order_status': {'type': 'string'},
+                        }
+                    }
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
+        summary="Purchase cart items with tokens",
+        description="장바구니 내 상품 결제",
+    )
+    def post(self, request):
+        try:
+            serializer = CartPaymentSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            items = serializer.validated_data['items']
+            total_price = serializer.validated_data['total_price']
+
+            # Check if items list is empty
+            if not items or len(items) == 0:
+                return Response(
+                    {
+                        'status': 400,
+                        'message': '결제할 상품이 선택되지 않았습니다.',
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Convert items to list of dicts
+            cart_item_ids_with_quantities = [
+                {'cart_item_id': item['cart_item_id'], 'quantity': item['quantity']}
+                for item in items
+            ]
+
+            order, new_balance, cart_items = order_history_service.purchase_cart_items_with_tokens(
+                user_id=request.user.id,
+                cart_item_ids_with_quantities=cart_item_ids_with_quantities,
+                total_price=total_price,
+            )
+
+            # Format order_id: ORD-YYYYMMDD-XXX
+            order_date = order.created_at.strftime('%Y%m%d')
+            order_id_formatted = f"ORD-{order_date}-{str(order.id).zfill(3)}"
+
+            # Format order_items
+            order_items = [
+                {'cart_item_id': item['cart_item_id'], 'quantity': item['quantity']}
+                for item in items
+            ]
+
+            return Response(
+                {
+                    'status': 201,
+                    'message': '장바구니 상품 결제가 성공적으로 완료되었습니다.',
+                    'data': {
+                        'order_id': order_id_formatted,
+                        'order_items': order_items,
+                        'total_price': total_price,
+                        'current_tokens': new_balance,
+                        'order_status': 'sucess',
+                    }
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except InsufficientTokenBalanceError as e:
+            return Response(
+                {
+                    'status': 402,
+                    'message': '토큰 잔액이 부족합니다.',
+                },
+                status=402  # Payment Required
+            )
+        except OrderNotFoundError as e:
+            return Response(
+                {
+                    'status': 400,
+                    'message': '결제할 상품이 선택되지 않았습니다.',
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"장바구니 결제 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류로 결제에 실패했습니다.',
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
@@ -439,7 +573,14 @@ class TokenBalanceView(APIView):
         description="현재 사용자의 토큰 잔액 조회",
     )
     def get(self, request):
-        current_balance = request.user.token_balance or 0
+        from modules.users.models import UserModel
+        
+        # DB에서 최신 토큰 잔액 조회
+        try:
+            user = UserModel.objects.get(id=request.user.id, deleted_at__isnull=True)
+            current_balance = user.token_balance or 0
+        except UserModel.DoesNotExist:
+            current_balance = 0
 
         return Response(
             {
