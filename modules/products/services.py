@@ -6,7 +6,7 @@ from typing import Optional, List
 from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from django.db.models import Q
-from timers.models import PriceHistoryModel
+from modules.timers.models import PriceHistoryModel
 from .models import ProductModel, MallInformationModel
 from .exceptions import (
     ProductNotFoundError,
