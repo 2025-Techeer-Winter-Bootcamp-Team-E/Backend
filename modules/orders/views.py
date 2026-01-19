@@ -1,6 +1,7 @@
 """
 Orders module API views.
 """
+import logging
 from datetime import datetime
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -22,7 +23,11 @@ from .serializers import (
     TokenPurchaseSerializer,
 )
 from .exceptions import InvalidRechargeAmountError, InsufficientTokenBalanceError, OrderNotFoundError
+from modules.products.exceptions import ProductNotFoundError
+from modules.products.services import ProductService
 
+
+logger = logging.getLogger(__name__)
 
 cart_service = CartService()
 order_service = OrderService()
@@ -30,35 +35,106 @@ order_history_service = OrderHistoryService()
 review_service = ReviewService()
 
 
-@extend_schema(tags=['Cart'])
-class CartView(APIView):
-    """Cart (장바구니) endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: CartSerializer},
-        summary="Get current user's cart",
-    )
-    def get(self, request):
-        cart = cart_service.get_or_create_cart(request.user.id)
-        items = cart_service.get_cart_items(cart.id)
-        cart.items = items  # Attach items for serializer
-        return Response(CartSerializer(cart).data)
-
-
-@extend_schema(tags=['Cart'])
+@extend_schema(tags=['Orders'])
 class CartItemListCreateView(APIView):
     """Cart item list and create endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        responses={200: CartItemSerializer(many=True)},
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'cart_item_id': {'type': 'integer'},
+                                'product_id': {'type': 'integer'},
+                                'product_name': {'type': 'string'},
+                                'product_resentative_image_url': {'type': 'string'},
+                                'quantity': {'type': 'integer'},
+                                'price': {'type': 'integer'},
+                                'total_price': {'type': 'integer'},
+                            }
+                        }
+                    }
+                }
+            },
+            401: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
         summary="Get current user's cart items",
+        description="장바구니 목록 조회",
     )
     def get(self, request):
-        cart = cart_service.get_or_create_cart(request.user.id)
-        items = cart_service.get_cart_items(cart.id)
-        return Response(CartItemSerializer(items, many=True).data)
+        try:
+            cart = cart_service.get_or_create_cart(request.user.id)
+            items = cart_service.get_cart_items(cart.id)
+            
+            result = []
+            for item in items:
+                product = item.product
+                if not product:
+                    continue
+                
+                # Get representative image URL from mall_information
+                representative_image_url = ''
+                try:
+                    mall_info = product.mall_information.filter(
+                        deleted_at__isnull=True
+                    ).first()
+                    if mall_info and mall_info.representative_image_url:
+                        representative_image_url = mall_info.representative_image_url
+                except Exception:
+                    pass
+                
+                # Use lowest_price as price
+                price = product.lowest_price or 0
+                total_price = price * item.quantity
+                
+                result.append({
+                    'cart_item_id': item.id,
+                    'product_id': product.id,
+                    'product_name': product.name,
+                    'product_resentative_image_url': representative_image_url,
+                    'quantity': item.quantity,
+                    'price': price,
+                    'total_price': total_price,
+                })
+            
+            return Response(
+                {
+                    'status': 200,
+                    'message': '장바구니 목록 조회 성공',
+                    'data': result,
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"장바구니 조회 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @extend_schema(
         request=CartItemCreateSerializer,

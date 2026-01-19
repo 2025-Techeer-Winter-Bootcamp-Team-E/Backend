@@ -42,7 +42,7 @@ class CartService:
             CartItemModel.objects.filter(
                 cart_id=cart_id,
                 deleted_at__isnull=True
-            ).select_related('product')
+            ).select_related('product').prefetch_related('product__mall_information')
         )
 
     def add_item(
