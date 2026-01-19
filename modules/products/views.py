@@ -1,7 +1,7 @@
 """
 Products module API views.
 """
-from drf_spectacular.utils import extend_schema,OpenApiResponse,OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter,OpenApiResponse
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.response import Response
@@ -210,3 +210,4 @@ class ProductPriceTrendView(APIView):
             "status": 200,
             "data": serializer.data
         })
+

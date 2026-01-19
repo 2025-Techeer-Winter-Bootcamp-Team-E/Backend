@@ -2,10 +2,8 @@
 Products module serializers.
 """
 from rest_framework import serializers
-
 from .models import ProductModel, MallInformationModel
-from timers.models import PriceHistoryModel
-
+from modules.timers.models import PriceHistoryModel
 
 class MallInformationSerializer(serializers.ModelSerializer):
     """Serializer for mall information."""
@@ -109,14 +107,16 @@ class MallInformationCreateSerializer(serializers.Serializer):
         required=False,
         default=list
     )
+
 #과거 가격 시리얼 라이저(일 단위)
 class PriceHistorySerializer(serializers.ModelSerializer):
-    data =serializers.DateTimeField(source='recoreded_at', format='%Y-%m-%d')
+    data =serializers.DateTimeField(source='recorded_at', format='%Y-%m-%d')
     price =serializers.IntegerField(source='lowest_price')
 
     class Meta:
         model=PriceHistoryModel
-        field=['data','price']
+        fields=['data','price']
+
 
 #가격 추이 시리얼 라이저(기간)       
 class ProductPriceTrendSerializer(serializers.Serializer):
@@ -125,4 +125,3 @@ class ProductPriceTrendSerializer(serializers.Serializer):
     period_unit = serializers.CharField(default="month")
     selected_period = serializers.IntegerField()
     price_history = PriceHistorySerializer(many=True)
-

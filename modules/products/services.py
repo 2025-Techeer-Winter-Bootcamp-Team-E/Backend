@@ -132,7 +132,6 @@ class ProductService:
             "price_history": histories
         }
 
-
 class MallInformationService:
     """
     Mall information business logic service.
