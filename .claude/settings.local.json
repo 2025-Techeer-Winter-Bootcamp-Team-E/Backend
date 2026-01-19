@@ -26,7 +26,19 @@
       "Bash(docker logs:*)",
       "Bash(ls:*)",
       "Bash(python3:*)",
-      "Bash(docker volume rm:*)"
+      "Bash(docker volume rm:*)",
+      "Bash(updated\" /tmp/claude/-Users-chosunghoon-Desktop-GitHub-Techeerbootcamp-E-Backend-Backend/tasks/b6a69c1.output 2>/dev/null\\)\")",
+      "Bash(error)",
+      "Bash(오류)",
+      "Bash(실패)",
+      "Bash(✗\" /tmp/claude/-Users-chosunghoon-Desktop-GitHub-Techeerbootcamp-E-Backend-Backend/tasks/b6a69c1.output 2>/dev/null || echo 0\\)\")",
+      "Bash(python:*)",
+      "Bash(docker compose exec backend python manage.py shell:*)",
+      "Bash(cat:*)",
+      "Bash(__NEW_LINE_dde4031b117a2555__ echo \"\")",
+      "Bash(__NEW_LINE_c6808c9872ee9348__ echo \"\")",
+      "Bash(__NEW_LINE_6905e53fc204e780__ docker exec backend_postgres psql -U postgres -d backend -c \"\nSELECT COUNT\\(DISTINCT danawa_product_id\\) as unique_products FROM price_histories WHERE deleted_at IS NULL;\n\")",
+      "Bash(__NEW_LINE_a3bf731da7bfbb54__ echo \"\")"
     ]
   }
 }

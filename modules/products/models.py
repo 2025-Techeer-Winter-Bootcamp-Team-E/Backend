@@ -49,6 +49,15 @@ class ProductModel(models.Model):
         blank=True,
         verbose_name='상품상태'
     )
+    review_count = models.IntegerField(
+        default=0,
+        verbose_name='리뷰 수'
+    )
+    review_rating = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='평균 별점'
+    )
     category = models.ForeignKey(
         'categories.CategoryModel',
         on_delete=models.SET_NULL,

@@ -81,7 +81,7 @@ def crawl_product(danawa_product_id: str) -> dict:
     """
     from .crawlers import DanawaCrawler
     from .models import ProductModel, MallInformationModel
-    from modules.price_prediction.models import PriceHistoryModel
+    from modules.timers.models import PriceHistoryModel
     from modules.orders.models import ReviewModel
     from modules.users.models import UserModel
 
@@ -130,6 +130,8 @@ def crawl_product(danawa_product_id: str) -> dict:
                     'registration_month': product_info.registration_date,
                     'product_status': product_info.product_status,
                     'category': category,
+                    'review_count': product_info.mall_review_count,
+                    'review_rating': product_info.review_rating,
                 }
             )
 
@@ -225,7 +227,7 @@ def crawl_product(danawa_product_id: str) -> dict:
                 # 중복 방지: 해당 날짜에 이미 기록이 있으면 업데이트
                 try:
                     PriceHistoryModel.objects.update_or_create(
-                        product=product,
+                        danawa_product_id=product.danawa_product_id,
                         recorded_at__date=recorded_date.date(),
                         defaults={
                             'lowest_price': ph.price,
@@ -237,7 +239,7 @@ def crawl_product(danawa_product_id: str) -> dict:
                     # 중복 키 등의 오류 시 월 단위로 재시도
                     try:
                         PriceHistoryModel.objects.update_or_create(
-                            product=product,
+                            danawa_product_id=product.danawa_product_id,
                             recorded_at__year=recorded_date.year,
                             recorded_at__month=recorded_date.month,
                             defaults={
@@ -250,42 +252,37 @@ def crawl_product(danawa_product_id: str) -> dict:
                         logger.warning(f"Failed to save price history for {recorded_date}: {e}")
 
             # ========================================
-            # 5. 리뷰 저장 (ReviewModel)
+            # 5. 리뷰 요약 정보 저장 (ReviewModel)
             # ========================================
+            # 다나와에서 개별 리뷰 콘텐츠는 JavaScript로 동적 로드되어 크롤링 어려움
+            # 대신 상품의 리뷰 통계 정보(총 리뷰 수, 평균 별점)를 저장
             review_count = 0
 
-            # 리뷰 저장 시 사용할 시스템 유저 (크롤링 리뷰용)
-            # 실제 서비스에서는 별도의 시스템 유저를 생성하거나 null 허용 필요
-            system_user = None
-            try:
-                system_user = UserModel.objects.filter(email='system@danawa.com').first()
-                if not system_user:
-                    # 시스템 유저가 없으면 첫 번째 유저 사용 (개발용)
-                    system_user = UserModel.objects.first()
-            except Exception:
-                pass
+            # 리뷰 통계가 있을 경우에만 저장
+            if product_info.mall_review_count > 0:
+                system_user = None
+                try:
+                    system_user = UserModel.objects.filter(email='system@danawa.com').first()
+                    if not system_user:
+                        system_user = UserModel.objects.first()
+                except Exception:
+                    pass
 
-            if system_user:
-                for review in reviews:
-                    # 리뷰 내용으로 중복 체크
-                    existing_review = ReviewModel.objects.filter(
-                        product=product,
-                        reviewer_name=review.reviewer_name,
-                        content=review.content[:100] if review.content else ''
-                    ).first()
-
-                    if not existing_review:
-                        ReviewModel.objects.create(
-                            product=product,
-                            user=system_user,
-                            mall_name=review.shop_name,
-                            reviewer_name=review.reviewer_name,
-                            content=review.content,
-                            rating=review.rating,
-                            review_images=review.review_images,
-                            external_review_count=product_info.mall_review_count,
-                        )
-                        review_count += 1
+                if system_user:
+                    # 상품당 하나의 리뷰 요약 레코드 생성/업데이트
+                    review_obj, review_created = ReviewModel.objects.update_or_create(
+                        danawa_product_id=product.danawa_product_id,
+                        reviewer_name='다나와 통합 리뷰',  # 시스템 생성 리뷰 식별용
+                        defaults={
+                            'user': system_user,
+                            'mall_name': '다나와 (외부 쇼핑몰 통합)',
+                            'content': f'{product_info.product_name} 상품의 외부 쇼핑몰 리뷰 통계입니다. 총 {product_info.mall_review_count}개의 리뷰가 있으며 평균 별점은 {product_info.review_rating or "N/A"}점입니다.',
+                            'rating': int(product_info.review_rating) if product_info.review_rating else None,
+                            'external_review_count': product_info.mall_review_count,
+                        }
+                    )
+                    review_count = 1 if review_created else 0
+                    logger.info(f"Review summary for {danawa_product_id}: {product_info.mall_review_count} reviews, rating {product_info.review_rating}")
 
             return {
                 'success': True,
@@ -350,6 +347,8 @@ def crawl_product_basic(danawa_product_id: str) -> dict:
                     'registration_month': product_info.registration_date,
                     'product_status': product_info.product_status,
                     'category': category,
+                    'review_count': product_info.mall_review_count,
+                    'review_rating': product_info.review_rating,
                 }
             )
 
@@ -545,13 +544,13 @@ def record_price_history(product_id: int) -> dict:
         결과 딕셔너리
     """
     from .models import ProductModel
-    from modules.price_prediction.models import PriceHistoryModel
+    from modules.timers.models import PriceHistoryModel
 
     try:
         product = ProductModel.objects.get(id=product_id, deleted_at__isnull=True)
 
         PriceHistoryModel.objects.create(
-            product=product,
+            danawa_product_id=product.danawa_product_id,
             lowest_price=product.lowest_price,
             recorded_at=timezone.now(),
         )
@@ -593,14 +592,103 @@ def record_all_price_histories() -> dict:
 # 리뷰 크롤링 태스크
 # ============================================================
 
-@shared_task(name='products.crawl_product_reviews')
-def crawl_product_reviews(danawa_product_id: str, max_pages: int = 5) -> dict:
+@shared_task(name='products.crawl_product_full_selenium')
+def crawl_product_full_selenium(danawa_product_id: str) -> dict:
     """
-    특정 상품의 리뷰만 크롤링.
+    Selenium을 사용하여 상품 전체 크롤링 (쇼핑몰 정보 + 이미지 포함).
+
+    requests 기반 크롤링으로 가져오지 못하는 데이터를 Selenium으로 수집:
+    - 쇼핑몰별 가격 정보 (seller_logo_url 포함)
+    - 상세 이미지, 추가 이미지, 제품설명 이미지
 
     Args:
         danawa_product_id: 다나와 상품 ID
-        max_pages: 최대 크롤링 페이지 수
+
+    Returns:
+        결과 딕셔너리
+    """
+    from .crawlers import DanawaCrawler
+    from .models import ProductModel, MallInformationModel
+
+    try:
+        product = ProductModel.objects.get(
+            danawa_product_id=danawa_product_id,
+            deleted_at__isnull=True
+        )
+    except ProductModel.DoesNotExist:
+        return {'success': False, 'error': 'Product not found in DB'}
+
+    try:
+        with DanawaCrawler(delay_range=(0.5, 1)) as crawler:
+            # 쇼핑몰 가격 정보 크롤링 (Selenium)
+            mall_prices = crawler.get_mall_prices_with_selenium(danawa_product_id, limit=30)
+
+            # 이미지 크롤링 (Selenium)
+            images = crawler.get_product_images_with_selenium(danawa_product_id)
+
+            mall_count = 0
+            for mall in mall_prices:
+                MallInformationModel.objects.update_or_create(
+                    product=product,
+                    mall_name=mall.mall_name,
+                    defaults={
+                        'current_price': mall.price,
+                        'product_page_url': mall.product_url or '',
+                        'seller_logo_url': mall.logo_url or '',
+                        'representative_image_url': images.get('main_image') or '',
+                        'additional_image_urls': images.get('additional_images', []),
+                        'detail_page_image_url': ', '.join(images.get('detail_images', [])),
+                        'product_description_image_url': ', '.join(images.get('description_images', [])),
+                    }
+                )
+                mall_count += 1
+
+            # 쇼핑몰 정보가 없을 경우 기본 레코드 생성
+            if not mall_prices and images.get('main_image'):
+                MallInformationModel.objects.update_or_create(
+                    product=product,
+                    mall_name='다나와',
+                    defaults={
+                        'current_price': product.lowest_price,
+                        'product_page_url': f'https://prod.danawa.com/info/?pcode={danawa_product_id}',
+                        'representative_image_url': images.get('main_image') or '',
+                        'additional_image_urls': images.get('additional_images', []),
+                        'detail_page_image_url': ', '.join(images.get('detail_images', [])),
+                        'product_description_image_url': ', '.join(images.get('description_images', [])),
+                    }
+                )
+                mall_count = 1
+
+            logger.info(f"Product {danawa_product_id} updated with Selenium: {mall_count} malls")
+
+            return {
+                'success': True,
+                'product_id': product.id,
+                'mall_count': mall_count,
+                'images': {
+                    'main': bool(images.get('main_image')),
+                    'additional': len(images.get('additional_images', [])),
+                    'detail': len(images.get('detail_images', [])),
+                    'description': len(images.get('description_images', [])),
+                }
+            }
+
+    except Exception as e:
+        logger.error(f"Error crawling product {danawa_product_id} with Selenium: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+@shared_task(name='products.crawl_individual_reviews_selenium')
+def crawl_individual_reviews_selenium(danawa_product_id: str, limit: int = 50) -> dict:
+    """
+    Selenium을 사용하여 개별 리뷰 크롤링 및 저장.
+
+    다나와 리뷰는 JavaScript로 동적 로드되므로 Selenium을 사용합니다.
+    크롤링한 개별 리뷰를 ReviewModel에 저장합니다.
+
+    Args:
+        danawa_product_id: 다나와 상품 ID
+        limit: 최대 리뷰 수
 
     Returns:
         결과 딕셔너리
@@ -620,9 +708,106 @@ def crawl_product_reviews(danawa_product_id: str, max_pages: int = 5) -> dict:
 
     try:
         with DanawaCrawler() as crawler:
-            reviews = crawler.get_reviews(danawa_product_id, max_pages=max_pages)
+            # Selenium으로 개별 리뷰 크롤링
+            reviews = crawler.get_reviews_with_selenium(danawa_product_id, limit=limit)
 
             if not reviews:
+                return {'success': True, 'message': 'No reviews found', 'count': 0}
+
+            # 시스템 유저 조회 (크롤링된 리뷰는 시스템 유저로 저장)
+            system_user = UserModel.objects.filter(email='system@danawa.com').first()
+            if not system_user:
+                system_user = UserModel.objects.first()
+
+            if not system_user:
+                return {'success': False, 'error': 'No user available for review creation'}
+
+            created_count = 0
+            updated_count = 0
+
+            for review in reviews:
+                # 리뷰 고유 식별: 상품ID + 작성자 + 날짜 + 내용 일부
+                content_preview = (review.content or '')[:100]
+
+                # 기존 리뷰 확인 (중복 방지)
+                existing_review = ReviewModel.objects.filter(
+                    danawa_product_id=danawa_product_id,
+                    reviewer_name=review.reviewer_name or 'Unknown',
+                    mall_name=review.shop_name,
+                ).first()
+
+                if existing_review:
+                    # 기존 리뷰 업데이트
+                    existing_review.content = review.content
+                    existing_review.rating = review.rating
+                    existing_review.review_images = review.review_images if review.review_images else None
+                    existing_review.save(update_fields=['content', 'rating', 'review_images', 'updated_at'])
+                    updated_count += 1
+                else:
+                    # 새 리뷰 생성
+                    ReviewModel.objects.create(
+                        danawa_product_id=danawa_product_id,
+                        user=system_user,
+                        mall_name=review.shop_name,
+                        reviewer_name=review.reviewer_name or 'Unknown',
+                        content=review.content,
+                        rating=review.rating,
+                        review_images=review.review_images if review.review_images else None,
+                    )
+                    created_count += 1
+
+            logger.info(
+                f"Reviews for {danawa_product_id}: {created_count} created, {updated_count} updated"
+            )
+
+            return {
+                'success': True,
+                'product_id': product.id,
+                'total_reviews': len(reviews),
+                'created': created_count,
+                'updated': updated_count,
+            }
+
+    except Exception as e:
+        logger.error(f"Error crawling individual reviews for {danawa_product_id}: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+@shared_task(name='products.crawl_product_reviews')
+def crawl_product_reviews(danawa_product_id: str) -> dict:
+    """
+    특정 상품의 리뷰 통계 정보 크롤링 및 저장.
+    다나와에서 개별 리뷰 콘텐츠는 JavaScript로 동적 로드되어 크롤링 어려움.
+    대신 상품의 리뷰 통계 정보(총 리뷰 수, 평균 별점)를 저장.
+
+    Args:
+        danawa_product_id: 다나와 상품 ID
+
+    Returns:
+        결과 딕셔너리
+    """
+    from .crawlers import DanawaCrawler
+    from .models import ProductModel
+    from modules.orders.models import ReviewModel
+    from modules.users.models import UserModel
+
+    try:
+        product = ProductModel.objects.get(
+            danawa_product_id=danawa_product_id,
+            deleted_at__isnull=True
+        )
+    except ProductModel.DoesNotExist:
+        return {'success': False, 'error': 'Product not found in DB'}
+
+    try:
+        with DanawaCrawler() as crawler:
+            # 상품 정보에서 리뷰 통계 가져오기
+            product_info = crawler.get_product_info(danawa_product_id)
+
+            if not product_info:
+                return {'success': False, 'error': 'Failed to get product info'}
+
+            if product_info.mall_review_count == 0:
                 return {'success': True, 'message': 'No reviews found', 'count': 0}
 
             # 시스템 유저 조회
@@ -633,32 +818,30 @@ def crawl_product_reviews(danawa_product_id: str, max_pages: int = 5) -> dict:
             if not system_user:
                 return {'success': False, 'error': 'No user available for review creation'}
 
-            review_count = 0
-            for review in reviews:
-                # 중복 체크
-                existing = ReviewModel.objects.filter(
-                    product=product,
-                    reviewer_name=review.reviewer_name,
-                    content=review.content[:100] if review.content else ''
-                ).exists()
+            # 리뷰 요약 레코드 생성/업데이트
+            review_obj, review_created = ReviewModel.objects.update_or_create(
+                danawa_product_id=danawa_product_id,
+                reviewer_name='다나와 통합 리뷰',
+                defaults={
+                    'user': system_user,
+                    'mall_name': '다나와 (외부 쇼핑몰 통합)',
+                    'content': f'{product_info.product_name} 상품의 외부 쇼핑몰 리뷰 통계입니다. 총 {product_info.mall_review_count}개의 리뷰가 있으며 평균 별점은 {product_info.review_rating or "N/A"}점입니다.',
+                    'rating': int(product_info.review_rating) if product_info.review_rating else None,
+                    'external_review_count': product_info.mall_review_count,
+                }
+            )
 
-                if not existing:
-                    ReviewModel.objects.create(
-                        product=product,
-                        user=system_user,
-                        mall_name=review.shop_name,
-                        reviewer_name=review.reviewer_name,
-                        content=review.content,
-                        rating=review.rating,
-                        review_images=review.review_images,
-                    )
-                    review_count += 1
+            # ProductModel의 리뷰 정보도 업데이트
+            product.review_count = product_info.mall_review_count
+            product.review_rating = product_info.review_rating
+            product.save(update_fields=['review_count', 'review_rating'])
 
             return {
                 'success': True,
                 'product_id': product.id,
-                'review_count': review_count,
-                'total_crawled': len(reviews),
+                'review_count': product_info.mall_review_count,
+                'review_rating': product_info.review_rating,
+                'created': review_created,
             }
 
     except Exception as e:
