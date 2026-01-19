@@ -3,9 +3,10 @@ Products module service layer.
 """
 from datetime import datetime
 from typing import Optional, List
-
+from django.utils import timezone
+from dateutil.relativedelta import relativedelta
 from django.db.models import Q
-
+from timers.models import PriceHistoryModel
 from .models import ProductModel, MallInformationModel
 from .exceptions import (
     ProductNotFoundError,
@@ -47,20 +48,6 @@ class ProductService:
             queryset = queryset.filter(category_id=category_id)
         return list(queryset.order_by('-created_at')[offset:offset + limit])
 
-    def search_products(
-        self,
-        query: str,
-        category_id: int = None,
-        limit: int = 20,
-    ) -> List[ProductModel]:
-        """Search products by name or brand."""
-        queryset = ProductModel.objects.filter(
-            Q(name__icontains=query) | Q(brand__icontains=query),
-            deleted_at__isnull=True
-        )
-        if category_id:
-            queryset = queryset.filter(category_id=category_id)
-        return list(queryset[:limit])
 
     def search_by_embedding(
         self,
@@ -126,6 +113,24 @@ class ProductService:
         product.deleted_at = datetime.now()
         product.save()
         return True
+    
+    def get_price_trend_data(self, product: ProductModel, months: int = 6): #views.py에서 탐색 기간 설정 조작가능
+        start_date = timezone.now() - relativedelta(months=months)
+
+        # 2. 필터 조건에 '날짜' 추가 (start_date 이후 데이터만!)
+        histories = PriceHistoryModel.objects.filter(
+            danawa_product_id=product.danawa_product_id,
+            recorded_at__gte=start_date, # 탐색 기간 설정 로직
+            deleted_at__isnull=True
+        ).order_by('recorded_at')
+        
+        return {
+            "product_id": product.id,
+            "product_name": product.name,
+            "period_unit": "month",
+            "selected_period": months,
+            "price_history": histories
+        }
 
 
 class MallInformationService:

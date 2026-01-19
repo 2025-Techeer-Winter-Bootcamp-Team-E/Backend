@@ -1,18 +1,19 @@
 """
 Products module API views.
 """
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema,OpenApiResponse,OpenApiParameter
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .services import ProductService, MallInformationService
+from .services import ProductService, MallInformationService,ProductService
 from .serializers import (
     ProductSerializer,
     ProductListSerializer,
     ProductCreateSerializer,
     ProductUpdateSerializer,
+    ProductPriceTrendSerializer,
     MallInformationSerializer,
     MallInformationCreateSerializer,
 )
@@ -126,38 +127,6 @@ class ProductDetailView(APIView):
 
 
 @extend_schema(tags=['Products'])
-class ProductSearchView(APIView):
-    """Product search endpoint."""
-    permission_classes = [AllowAny]
-
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(name='q', type=str, required=True, description="Search query"),
-            OpenApiParameter(name='category_id', type=int, required=False),
-            OpenApiParameter(name='limit', type=int, required=False),
-        ],
-        responses={200: ProductListSerializer(many=True)},
-        summary="Search products",
-    )
-    def get(self, request):
-        query = request.query_params.get('q', '')
-        if not query:
-            return Response({'error': 'Query parameter required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        category_id = request.query_params.get('category_id')
-        limit = int(request.query_params.get('limit', 20))
-
-        products = product_service.search_products(
-            query=query,
-            category_id=int(category_id) if category_id else None,
-            limit=limit,
-        )
-
-        serializer = ProductListSerializer(products, many=True)
-        return Response(serializer.data)
-
-
-@extend_schema(tags=['Products'])
 class ProductMallInfoView(APIView):
     """Product mall information endpoint."""
 
@@ -197,3 +166,47 @@ class ProductMallInfoView(APIView):
 
         output = MallInformationSerializer(mall_info)
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+@extend_schema(tags=['Products'])
+class ProductPriceTrendView(APIView):
+    """상품의 월별 최저가 추이를 조회하는 API입니다."""
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="Get product price trend",
+        responses={
+            200: ProductPriceTrendSerializer,
+            400: OpenApiResponse(description="지원하지 않는 조회 기간입니다. (6, 12, 24 중 선택 가능)"), #
+            404: OpenApiResponse(description="상품 가격 이력 데이터를 찾을 수 없습니다.") #
+        }
+    )
+    def get(self, request, product_id: int):
+        # 1. 조회 기간(months) 검증 (명세서 400 에러 대응)
+        try:
+            months = int(request.query_params.get('months', 6))
+        except ValueError:
+            months = 0 # 숫자가 아니면 아래 조건에서 걸러지게 함
+
+        if months not in [6, 12, 24]:
+            return Response({
+                "status": 400,
+                "message": "지원하지 않는 조회 기간입니다. (6, 12, 24 중 선택 가능)"
+            }, status=status.HTTP_400_BAD_REQUEST) #
+
+        # 2. 상품 존재 여부 확인
+        product = product_service.get_product_by_id(product_id)
+        if not product:
+            return Response({
+                "status": 404,
+                "message": "상품 가격 이력 데이터를 찾을 수 없습니다."
+            }, status=status.HTTP_404_NOT_FOUND) #
+
+        # 3. 데이터 조회 및 응답
+        trend_data = product_service.get_price_trend_data(product, months=months)
+        serializer = ProductPriceTrendSerializer(trend_data)
+        
+        # 성공 시 응답 구조도 status를 포함하고 싶다면 아래처럼 보낼 수 있습니다.
+        return Response({
+            "status": 200,
+            "data": serializer.data
+        })
