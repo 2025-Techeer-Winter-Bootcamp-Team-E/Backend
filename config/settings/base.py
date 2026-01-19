@@ -173,7 +173,7 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': False,  # token_blacklist 앱 제거로 비활성화
+    'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
@@ -264,7 +264,7 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 
 # Embedding Settings
-EMBEDDING_MODEL = 'text-embedding-ada-002'
+EMBEDDING_MODEL = 'text-embedding-3-small'
 EMBEDDING_DIMENSIONS = 1536
 
 # Logging
