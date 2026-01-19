@@ -1,6 +1,7 @@
 """
 Orders module API views.
 """
+import logging
 from datetime import datetime
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -20,9 +21,14 @@ from .serializers import (
     ReviewCreateSerializer,
     TokenRechargeSerializer,
     TokenPurchaseSerializer,
+    CartPaymentSerializer,
 )
 from .exceptions import InvalidRechargeAmountError, InsufficientTokenBalanceError, OrderNotFoundError
+from modules.products.exceptions import ProductNotFoundError
+from modules.products.services import ProductService
 
+
+logger = logging.getLogger(__name__)
 
 cart_service = CartService()
 order_service = OrderService()
@@ -30,191 +36,417 @@ order_history_service = OrderHistoryService()
 review_service = ReviewService()
 
 
-@extend_schema(tags=['Cart'])
-class CartView(APIView):
-    """Cart (장바구니) endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: CartSerializer},
-        summary="Get current user's cart",
-    )
-    def get(self, request):
-        cart = cart_service.get_or_create_cart(request.user.id)
-        items = cart_service.get_cart_items(cart.id)
-        cart.items = items  # Attach items for serializer
-        return Response(CartSerializer(cart).data)
-
-
-@extend_schema(tags=['Cart'])
+@extend_schema(tags=['Orders'])
 class CartItemListCreateView(APIView):
     """Cart item list and create endpoint."""
     permission_classes = [IsAuthenticated]
-
+    
     @extend_schema(
-        responses={200: CartItemSerializer(many=True)},
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'cart_item_id': {'type': 'integer'},
+                                'product_id': {'type': 'integer'},
+                                'product_name': {'type': 'string'},
+                                'product_resentative_image_url': {'type': 'string'},
+                                'quantity': {'type': 'integer'},
+                                'price': {'type': 'integer'},
+                                'total_price': {'type': 'integer'},
+                            }
+                        }
+                    }
+                }
+            },
+            401: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
         summary="Get current user's cart items",
+        description="장바구니 목록 조회",
     )
     def get(self, request):
-        cart = cart_service.get_or_create_cart(request.user.id)
-        items = cart_service.get_cart_items(cart.id)
-        return Response(CartItemSerializer(items, many=True).data)
+        try:
+            cart = cart_service.get_or_create_cart(request.user.id)
+            items = cart_service.get_cart_items(cart.id)
+            
+            result = []
+            for item in items:
+                product = item.product
+                if not product:
+                    continue
+                
+                # Get representative image URL from mall_information
+                representative_image_url = ''
+                try:
+                    mall_info = product.mall_information.filter(
+                        deleted_at__isnull=True
+                    ).first()
+                    if mall_info and mall_info.representative_image_url:
+                        representative_image_url = mall_info.representative_image_url
+                except Exception:
+                    pass
+                
+                # Use lowest_price as price
+                price = product.lowest_price or 0
+                total_price = price * item.quantity
+                
+                result.append({
+                    'cart_item_id': item.id,
+                    'product_id': product.id,
+                    'product_name': product.name,
+                    'product_resentative_image_url': representative_image_url,
+                    'quantity': item.quantity,
+                    'price': price,
+                    'total_price': total_price,
+                })
+            
+            return Response(
+                {
+                    'status': 200,
+                    'message': '장바구니 목록 조회 성공',
+                    'data': result,
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"장바구니 조회 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @extend_schema(
         request=CartItemCreateSerializer,
-        responses={201: CartItemSerializer},
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'object',
+                        'properties': {
+                            'cart_item_id': {'type': 'integer'},
+                            'product_id': {'type': 'integer'},
+                            'quantity': {'type': 'integer'},
+                            'added_at': {'type': 'string'},
+                        }
+                    }
+                },
+                'example': {
+                    'status': 200,
+                    'message': '장바구니에 상품을 담았습니다.',
+                    'data': {
+                        'cart_item_id': 1006,
+                        'product_id': 702,
+                        'quantity': 2,
+                        'added_at': '2026-01-17T13:54:06'
+                    }
+                }
+            },
+            404: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 404,
+                    'message': '해당 상품을 찾을 수 없습니다.'
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.'
+                }
+            }
+        },
         summary="Add item to cart",
+        description="장바구니에 상품 추가",
     )
     def post(self, request):
-        serializer = CartItemCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer = CartItemCreateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
 
-        data = serializer.validated_data
-        cart = cart_service.get_or_create_cart(request.user.id)
-        item = cart_service.add_item(
-            cart_id=cart.id,
-            product_id=data['product_id'],
-            quantity=data['quantity'],
-        )
+            data = serializer.validated_data
+            product_id = data['product_id']
+            quantity = data['quantity']
 
-        return Response(CartItemSerializer(item).data, status=status.HTTP_201_CREATED)
+            # Check if product exists
+            from modules.products.models import ProductModel
+            try:
+                product = ProductModel.objects.get(id=product_id, deleted_at__isnull=True)
+            except ProductModel.DoesNotExist:
+                return Response(
+                    {
+                        'status': 404,
+                        'message': '해당 상품을 찾을 수 없습니다.',
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            cart = cart_service.get_or_create_cart(request.user.id)
+            item = cart_service.add_item(
+                cart_id=cart.id,
+                product_id=product_id,
+                quantity=quantity,
+            )
+
+            added_at = item.created_at.isoformat() if item.created_at else datetime.now().isoformat()
+
+            return Response(
+                {
+                    'status': 200,
+                    'message': '장바구니에 상품을 담았습니다.',
+                    'data': {
+                        'cart_item_id': item.id,
+                        'product_id': product_id,
+                        'quantity': item.quantity,
+                        'added_at': added_at,
+                    }
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"장바구니에 상품 추가 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
-@extend_schema(tags=['Cart'])
-class CartItemDetailView(APIView):
-    """Cart item detail endpoint."""
+@extend_schema(tags=['Orders'])
+class CartItemDeleteView(APIView):
+    """Cart item delete endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        request=CartItemUpdateSerializer,
-        responses={200: CartItemSerializer},
-        summary="Update cart item quantity",
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 200,
+                    'message': '장바구니 항목이 삭제되었습니다.'
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 400,
+                    'message': '잘못된 요청이거나 본인의 장바구니 항목이 아닙니다.'
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.'
+                }
+            }
+        },
+        summary="Remove item from cart",
+        description="장바구니에서 상품 삭제",
     )
-    def patch(self, request, product_id: int):
-        serializer = CartItemUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        cart = cart_service.get_or_create_cart(request.user.id)
-        item = cart_service.update_item_quantity(
-            cart_id=cart.id,
-            product_id=product_id,
-            quantity=serializer.validated_data['quantity'],
-        )
-
-        if item:
-            return Response(CartItemSerializer(item).data)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @extend_schema(summary="Remove item from cart")
     def delete(self, request, product_id: int):
-        cart = cart_service.get_or_create_cart(request.user.id)
-        cart_service.remove_item(cart.id, product_id)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            cart = cart_service.get_or_create_cart(request.user.id)
+            removed = cart_service.remove_item(cart.id, product_id)
+            
+            if not removed:
+                return Response(
+                    {
+                        'status': 400,
+                        'message': '잘못된 요청이거나 장바구니에 해당 상품이 없습니다.',
+                    },
+                    status=status.HTTP_400_NOT_FOUND    
+                )
+            
+            return Response(
+                {
+                    'status': 200,
+                    'message': '장바구니에서 항목이 삭제되었습니다.',
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"장바구니 삭제 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
-@extend_schema(tags=['Order'])
-class OrderListCreateView(APIView):
-    """Order list and create endpoint."""
+@extend_schema(tags=['Orders'])
+class CartPaymentView(APIView):
+    """Cart payment endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        responses={200: OrderSerializer(many=True)},
-        summary="List user's orders",
-    )
-    def get(self, request):
-        orders = order_service.get_user_orders(request.user.id)
-        return Response(OrderSerializer(orders, many=True).data)
-
-    @extend_schema(
-        responses={201: OrderSerializer},
-        summary="Create order from cart",
+        request=CartPaymentSerializer,
+        responses={
+            201: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'object',
+                        'properties': {
+                            'order_id': {'type': 'string'},
+                            'order_items': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'cart_item_id': {'type': 'integer'},
+                                        'quantity': {'type': 'integer'},
+                                    }
+                                }
+                            },
+                            'total_price': {'type': 'integer'},
+                            'current_tokens': {'type': 'integer'},
+                            'order_status': {'type': 'string'},
+                        }
+                    }
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
+        summary="Purchase cart items with tokens",
+        description="장바구니 내 상품 결제",
     )
     def post(self, request):
-        order = order_service.create_order_from_cart(request.user.id)
-        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+        try:
+            serializer = CartPaymentSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
 
+            items = serializer.validated_data['items']
+            total_price = serializer.validated_data['total_price']
 
-@extend_schema(tags=['Order'])
-class OrderDetailView(APIView):
-    """Order detail endpoint."""
-    permission_classes = [IsAuthenticated]
+            # Check if items list is empty
+            if not items or len(items) == 0:
+                return Response(
+                    {
+                        'status': 400,
+                        'message': '결제할 상품이 선택되지 않았습니다.',
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-    @extend_schema(
-        responses={200: OrderSerializer},
-        summary="Get order detail",
-    )
-    def get(self, request, order_id: int):
-        order = order_service.get_order_by_id(order_id)
-        if not order:
-            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+            # Convert items to list of dicts
+            cart_item_ids_with_quantities = [
+                {'cart_item_id': item['cart_item_id'], 'quantity': item['quantity']}
+                for item in items
+            ]
 
-        if order.user_id != request.user.id:
-            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+            order, new_balance, cart_items = order_history_service.purchase_cart_items_with_tokens(
+                user_id=request.user.id,
+                cart_item_ids_with_quantities=cart_item_ids_with_quantities,
+                total_price=total_price,
+            )
 
-        return Response(OrderSerializer(order).data)
+            # Format order_id: ORD-YYYYMMDD-XXX
+            order_date = order.created_at.strftime('%Y%m%d')
+            order_id_formatted = f"ORD-{order_date}-{str(order.id).zfill(3)}"
 
+            # Format order_items
+            order_items = [
+                {'cart_item_id': item['cart_item_id'], 'quantity': item['quantity']}
+                for item in items
+            ]
 
-@extend_schema(tags=['Order History'])
-class OrderHistoryListView(APIView):
-    """Order history list endpoint."""
-    permission_classes = [IsAuthenticated]
+            return Response(
+                {
+                    'status': 201,
+                    'message': '장바구니 상품 결제가 성공적으로 완료되었습니다.',
+                    'data': {
+                        'order_id': order_id_formatted,
+                        'order_items': order_items,
+                        'total_price': total_price,
+                        'current_tokens': new_balance,
+                        'order_status': 'success',
+                    }
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except OrderNotFoundError as e:
+            return Response(
+                {
+                    'status': 400,
+                    'message': '결제할 상품이 선택되지 않았습니다.',
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"장바구니 결제 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류로 결제에 실패했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-    @extend_schema(
-        responses={200: OrderHistorySerializer(many=True)},
-        summary="List user's order histories",
-    )
-    def get(self, request):
-        histories = order_history_service.get_user_order_histories(request.user.id)
-        return Response(OrderHistorySerializer(histories, many=True).data)
-
-
-@extend_schema(tags=['Review'])
-class ReviewListCreateView(APIView):
-    """Review list and create endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: ReviewSerializer(many=True)},
-        summary="List user's reviews",
-    )
-    def get(self, request):
-        reviews = review_service.get_user_reviews(request.user.id)
-        return Response(ReviewSerializer(reviews, many=True).data)
-
-    @extend_schema(
-        request=ReviewCreateSerializer,
-        responses={201: ReviewSerializer},
-        summary="Create a review",
-    )
-    def post(self, request):
-        serializer = ReviewCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        data = serializer.validated_data
-        review = review_service.create_review(
-            danawa_product_id=data['danawa_product_id'],
-            user_id=request.user.id,
-            content=data.get('content'),
-            rating=data.get('rating'),
-            mall_name=data.get('mall_name'),
-            reviewer_name=data.get('reviewer_name'),
-        )
-
-        return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
-
-
-@extend_schema(tags=['Review'])
-class ProductReviewListView(APIView):
-    """Product review list endpoint."""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: ReviewSerializer(many=True)},
-        summary="List product reviews",
-    )
-    def get(self, request, danawa_product_id: str):
-        reviews = review_service.get_product_reviews(danawa_product_id)
-        return Response(ReviewSerializer(reviews, many=True).data)
 
 
 @extend_schema(tags=['Orders'])
@@ -250,6 +482,10 @@ class TokenRechargeView(APIView):
                 'properties': {
                     'status': {'type': 'integer'},
                     'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 401,
+                    'message': '로그인이 필요합니다.'
                 }
             }
         },
@@ -307,16 +543,15 @@ class TokenBalanceView(APIView):
     @extend_schema(
         responses={
             200: {
-                'type': 'object',
-                'properties': {
-                    'status': {'type': 'integer'},
-                    'message': {'type': 'string'},
-                    'data': {
-                        'type': 'object',
-                        'properties': {
-                            'current_tokens': {'type': 'integer'},
-                        }
+                
+                
+                'status': {'type': 'integer'},
+                'data': {
+                    'type': 'object',
+                    'properties': {
+                    'current_tokens': {'type': 'integer'},
                     }
+                    
                 }
             },
             401: {
@@ -331,12 +566,18 @@ class TokenBalanceView(APIView):
         description="현재 사용자의 토큰 잔액 조회",
     )
     def get(self, request):
-        current_balance = request.user.token_balance or 0
+        from modules.users.models import UserModel
+        
+        # DB에서 최신 토큰 잔액 조회
+        try:
+            user = UserModel.objects.get(id=request.user.id, deleted_at__isnull=True)
+            current_balance = user.token_balance or 0
+        except UserModel.DoesNotExist:
+            current_balance = 0
 
         return Response(
             {
                 'status': 200,
-                'message': '토큰 잔액 조회가 완료되었습니다.',
                 'data': {
                     'current_tokens': current_balance,
                 }
@@ -450,11 +691,3 @@ class TokenPurchaseView(APIView):
                     },
                     status=status.HTTP_404_NOT_FOUND
                 )
-            # For other OrderNotFoundError cases
-            return Response(
-                {
-                    'status': 404,
-                    'message': str(e.message),
-                },
-                status=status.HTTP_404_NOT_FOUND
-            )

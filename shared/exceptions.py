@@ -74,6 +74,41 @@ def custom_exception_handler(exc, context):
     """Handle custom application exceptions."""
     # Call REST framework's default exception handler first
     response = exception_handler(exc, context)
+    
+    # Handle authentication errors (401)
+    from rest_framework.exceptions import NotAuthenticated, AuthenticationFailed
+    if isinstance(exc, (NotAuthenticated, AuthenticationFailed)):
+        return Response(
+            {
+                'status': 401,
+                'message': '로그인이 필요합니다.'
+            },
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+    
+    # Handle permission denied (403)
+    from rest_framework.exceptions import PermissionDenied
+    if isinstance(exc, PermissionDenied):
+        return Response(
+            {
+                'status': 403,
+                'message': '접근 권한이 없습니다.'
+            },
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # Convert DRF's default error format to our format if response exists
+    if response is not None and response.data:
+        # Check if it's DRF's default error format (has 'detail' key)
+        if 'detail' in response.data:
+            error_message = response.data['detail']
+            return Response(
+                {
+                    'status': response.status_code,
+                    'message': error_message
+                },
+                status=response.status_code
+            )
 
     # Handle NotFoundError
     if isinstance(exc, NotFoundError):

@@ -42,7 +42,7 @@ class CartService:
             CartItemModel.objects.filter(
                 cart_id=cart_id,
                 deleted_at__isnull=True
-            ).select_related('product')
+            ).select_related('product').prefetch_related('product__mall_information')
         )
 
     def add_item(
@@ -175,6 +175,9 @@ class OrderHistoryService:
     Order history business logic service.
     """
 
+    def __init__(self):
+        self.cart_service = CartService()
+
     def get_user_order_histories(
         self,
         user_id: int,
@@ -208,32 +211,20 @@ class OrderHistoryService:
     @transaction.atomic
     def recharge_token(self, user_id: int, recharge_amount: int) -> int:
         """
-        Recharge tokens for a user.
-        
-        Args:
-            user_id: User ID
-            recharge_amount: Amount of tokens to recharge
-            
-        Returns:
-            New token balance after recharge
-            
-        Raises:
-            InvalidRechargeAmountError: If recharge amount is below minimum (1000)
+        토큰 충전 로직
         """
         MINIMUM_RECHARGE_AMOUNT = 1000
         
         if recharge_amount < MINIMUM_RECHARGE_AMOUNT:
             raise InvalidRechargeAmountError(MINIMUM_RECHARGE_AMOUNT)
         
-        # Import UserService here to avoid circular imports
-        from modules.users.services import UserService
-        user_service = UserService()
+        from modules.users.models import UserModel
         
-        # Update user token balance
-        user = user_service.update_token_balance(user_id, recharge_amount)
-        new_balance = user.token_balance or 0
+        user = UserModel.objects.get(id=user_id, deleted_at__isnull=True)
+        user.token_balance = (user.token_balance or 0) + recharge_amount
+        user.save()
         
-        return new_balance
+        return user.token_balance
 
     @transaction.atomic
     def purchase_with_tokens(
@@ -258,16 +249,13 @@ class OrderHistoryService:
         Raises:
             InsufficientTokenBalanceError: If user doesn't have enough tokens
         """
-        # Import services here to avoid circular imports
-        from modules.users.services import UserService
-        from modules.products.services import ProductService
-        
-        user_service = UserService()
-        product_service = ProductService()
+        from modules.users.models import UserModel
+        from modules.products.models import ProductModel
         
         # Get user and check token balance
-        user = user_service.get_user_by_id(user_id)
-        if not user:
+        try:
+            user = UserModel.objects.get(id=user_id, deleted_at__isnull=True)
+        except UserModel.DoesNotExist:
             raise OrderNotFoundError(f"User {user_id}")
         
         current_balance = user.token_balance or 0
@@ -275,8 +263,9 @@ class OrderHistoryService:
             raise InsufficientTokenBalanceError(required=total_price, available=current_balance)
         
         # Get product
-        product = product_service.get_product_by_id(product_id)
-        if not product:
+        try:
+            product = ProductModel.objects.get(id=product_id, deleted_at__isnull=True)
+        except ProductModel.DoesNotExist:
             raise OrderNotFoundError(f"Product {product_id}")
         
         # Deduct tokens
@@ -304,6 +293,110 @@ class OrderHistoryService:
         )
         
         return order, new_balance, product
+
+    @transaction.atomic
+    def purchase_cart_items_with_tokens(
+        self,
+        user_id: int,
+        cart_item_ids_with_quantities: List[dict],
+        total_price: int,
+    ) -> tuple[OrderModel, int, List[CartItemModel]]:
+        """
+        Purchase cart items using tokens.
+        
+        Args:
+            user_id: User ID
+            cart_item_ids_with_quantities: List of dicts with {'cart_item_id': int, 'quantity': int}
+            total_price: Total price in tokens
+            
+        Returns:
+            Tuple of (OrderModel, new_token_balance, List[CartItemModel])
+            
+        Raises:
+            InsufficientTokenBalanceError: If user doesn't have enough tokens
+            OrderNotFoundError: If cart item or product not found
+        """
+        from modules.users.models import UserModel
+        
+        # Get user and check token balance
+        try:
+            user = UserModel.objects.get(id=user_id, deleted_at__isnull=True)
+        except UserModel.DoesNotExist:
+            raise OrderNotFoundError(f"User {user_id}")
+        
+        current_balance = user.token_balance or 0
+        if current_balance < total_price:
+            raise InsufficientTokenBalanceError(required=total_price, available=current_balance)
+        
+        # Get cart
+        cart = self.cart_service.get_or_create_cart(user_id)
+        
+        # Get cart items
+        cart_items = []
+        for item_data in cart_item_ids_with_quantities:
+            cart_item_id = item_data['cart_item_id']
+            quantity = item_data['quantity']
+            
+            try:
+                cart_item = CartItemModel.objects.select_related('product').get(
+                    id=cart_item_id,
+                    cart_id=cart.id,
+                    deleted_at__isnull=True
+                )
+                cart_items.append(cart_item)
+            except CartItemModel.DoesNotExist:
+                raise OrderNotFoundError(f"Cart item {cart_item_id}")
+        
+        if not cart_items:
+            raise OrderNotFoundError("No cart items found")
+        
+        # Deduct tokens
+        new_balance = current_balance - total_price
+        user.token_balance = new_balance
+        user.save()
+        
+        # Create order
+        order = OrderModel.objects.create(user_id=user_id)
+        
+        # Create order items from cart items
+        first_product_id = None
+        for item_data in cart_item_ids_with_quantities:
+            cart_item_id = item_data['cart_item_id']
+            quantity = item_data['quantity']
+            
+            cart_item = next((ci for ci in cart_items if ci.id == cart_item_id), None)
+            if not cart_item:
+                raise OrderNotFoundError(f"Cart item {cart_item_id} not found in cart")
+            
+            if not cart_item.product:
+                raise OrderNotFoundError(f"Product not found for cart item {cart_item_id}")
+            
+            if first_product_id is None:
+                first_product_id = cart_item.product.danawa_product_id
+            
+            OrderItemModel.objects.create(
+                order=order,
+                danawa_product_id=cart_item.product.danawa_product_id,
+                quantity=quantity,
+            )
+            
+            # Remove cart item (soft delete)
+            cart_item.deleted_at = datetime.now()
+            cart_item.save()
+        
+        # Create order history (payment transaction) - only once for total
+        if not first_product_id:
+            raise OrderNotFoundError("No valid products found in cart items")
+        
+        self.create_order_history(
+            user_id=user_id,
+            transaction_type='payment',
+            token_change=-total_price,
+            token_balance_after=new_balance,
+            danawa_product_id=first_product_id,
+        )
+        
+        return order, new_balance, cart_items
 
 
 class ReviewService:
