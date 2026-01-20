@@ -54,6 +54,8 @@ class CartItemModel(models.Model):
     product = models.ForeignKey(
         'products.ProductModel',
         on_delete=models.CASCADE,
+        to_field='danawa_product_id',
+        db_column='danawa_product_id',
         related_name='cart_items',
         verbose_name='상품번호'
     )
