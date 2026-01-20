@@ -38,7 +38,10 @@
       "Bash(__NEW_LINE_dde4031b117a2555__ echo \"\")",
       "Bash(__NEW_LINE_c6808c9872ee9348__ echo \"\")",
       "Bash(__NEW_LINE_6905e53fc204e780__ docker exec backend_postgres psql -U postgres -d backend -c \"\nSELECT COUNT\\(DISTINCT danawa_product_id\\) as unique_products FROM price_histories WHERE deleted_at IS NULL;\n\")",
-      "Bash(__NEW_LINE_a3bf731da7bfbb54__ echo \"\")"
+      "Bash(__NEW_LINE_a3bf731da7bfbb54__ echo \"\")",
+      "Bash(docker compose:*)",
+      "Bash(git reset:*)",
+      "Bash(git add:*)"
     ]
   }
 }

@@ -179,3 +179,83 @@ class MallInformationModel(models.Model):
     def is_deleted(self) -> bool:
         """Check if mall information is soft deleted."""
         return self.deleted_at is not None
+
+
+class ProductAIReviewAnalysisModel(models.Model):
+    """
+    상품별 AI 리뷰 분석 모델.
+
+    - ProductModel과 1:1 관계 (danawa_product_id 기준)
+    - ReviewModel과 1:N 관계 (하나의 AI 분석이 해당 상품의 여러 리뷰를 종합)
+    """
+
+    product = models.OneToOneField(
+        ProductModel,
+        on_delete=models.CASCADE,
+        to_field='danawa_product_id',
+        db_column='danawa_product_id',
+        related_name='ai_review_analysis',
+        verbose_name='상품'
+    )
+    ai_review_summary = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name='AI 리뷰 요약',
+        help_text='해당 상품의 전체 리뷰를 종합한 AI 요약'
+    )
+    ai_positive_review_analysis = models.JSONField(
+        null=True,
+        blank=True,
+        verbose_name='AI 긍정 리뷰 분석',
+        help_text='긍정적인 리뷰 포인트 분석 결과'
+    )
+    ai_negative_review_analysis = models.JSONField(
+        null=True,
+        blank=True,
+        verbose_name='AI 부정 리뷰 분석',
+        help_text='부정적인 리뷰 포인트 분석 결과'
+    )
+    ai_recommendation_score = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='AI 추천점수',
+        help_text='0~100점 구매 추천 점수'
+    )
+    ai_review_analysis_basis = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name='AI 리뷰 분석 근거',
+        help_text='AI가 분석에 사용한 근거 및 참고 리뷰'
+    )
+    analyzed_review_count = models.IntegerField(
+        default=0,
+        verbose_name='분석된 리뷰 수',
+        help_text='AI 분석에 사용된 리뷰 개수'
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='생성시각'
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='수정시각'
+    )
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='논리적삭제플래그'
+    )
+
+    class Meta:
+        db_table = 'product_ai_review_analysis'
+        verbose_name = 'Product AI Review Analysis'
+        verbose_name_plural = 'Product AI Review Analyses'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"AI Analysis for {self.product.name} (Score: {self.ai_recommendation_score})"
+
+    @property
+    def is_deleted(self) -> bool:
+        """Check if AI review analysis is soft deleted."""
+        return self.deleted_at is not None

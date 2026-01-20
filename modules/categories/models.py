@@ -21,6 +21,12 @@ class CategoryModel(models.Model):
         verbose_name='부모카테고리',
         help_text='자기참조'
     )
+    level = models.PositiveSmallIntegerField(
+        default=0,
+        db_index=True,
+        verbose_name='카테고리 레벨',
+        help_text='0=대분류, 1=중분류, 2=소분류, 3=세분류'
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name='생성시각'
@@ -61,12 +67,16 @@ class CategoryModel(models.Model):
             parent = parent.parent
         return ' > '.join(path_parts)
 
-    @property
-    def level(self) -> int:
-        """Get category depth level (0 = root)."""
+    def _calculate_level(self) -> int:
+        """Calculate category depth level by traversing parents."""
         level = 0
         parent = self.parent
         while parent:
             level += 1
             parent = parent.parent
         return level
+
+    def save(self, *args, **kwargs):
+        """Override save to auto-calculate level."""
+        self.level = self._calculate_level()
+        super().save(*args, **kwargs)
