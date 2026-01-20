@@ -93,8 +93,8 @@ class ProductDetailView(APIView):
         responses={200: ProductSerializer},
         summary="Get product detail",
     )
-    def get(self, request, product_id: int):
-        product = product_service.get_product_by_id(product_id)
+    def get(self, request, product_code: str):
+        product = product_service.get_product_by_code(product_code)
         if not product:
             return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -139,8 +139,8 @@ class ProductMallInfoView(APIView):
         responses={200: MallInformationSerializer(many=True)},
         summary="Get mall information for a product",
     )
-    def get(self, request, product_id: int):
-        mall_info = mall_info_service.get_mall_info_by_product(product_id)
+    def get(self, request, product_code: str):
+        mall_info = mall_info_service.get_mall_info_by_code(product_code)
         serializer = MallInformationSerializer(mall_info, many=True)
         return Response(serializer.data)
 
@@ -180,7 +180,7 @@ class ProductPriceTrendView(APIView):
             404: OpenApiResponse(description="상품 가격 이력 데이터를 찾을 수 없습니다.") #
         }
     )
-    def get(self, request, product_id: int):
+    def get(self, request, product_code: str):
         # 1. 조회 기간(months) 검증 (명세서 400 에러 대응)
         try:
             months = int(request.query_params.get('months', 6))
@@ -194,13 +194,13 @@ class ProductPriceTrendView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST) #
 
         # 2. 상품 존재 여부 확인
-        product = product_service.get_product_by_id(product_id)
+        product = product_service.get_product_by_code(product_code)
         if not product:
             return Response({
                 "status": 404,
                 "message": "상품 가격 이력 데이터를 찾을 수 없습니다."
             }, status=status.HTTP_404_NOT_FOUND) #
-
+        
         # 3. 데이터 조회 및 응답
         trend_data = product_service.get_price_trend_data(product, months=months)
         serializer = ProductPriceTrendSerializer(trend_data)

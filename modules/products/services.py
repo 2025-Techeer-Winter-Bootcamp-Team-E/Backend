@@ -24,11 +24,11 @@ class ProductService:
             return ProductModel.objects.get(id=product_id, deleted_at__isnull=True)
         except ProductModel.DoesNotExist:
             return None
-
-    def get_product_by_danawa_id(self, danawa_product_id: str) -> Optional[ProductModel]:
+    #이용자 서비스 용 get(product_code기반 호출)
+    def get_product_by_code(self, product_code: str) -> Optional[ProductModel]:
         """Get product by Danawa product ID."""
         try:
-            return ProductModel.objects.get(danawa_product_id=danawa_product_id, deleted_at__isnull=True)
+            return ProductModel.objects.get(danawa_product_id=product_code, deleted_at__isnull=True)
         except ProductModel.DoesNotExist:
             return None
 
@@ -125,7 +125,7 @@ class ProductService:
         ).order_by('recorded_at')
         
         return {
-            "product_id": product.id,
+            "product_code": product.danawa_product_id,
             "product_name": product.name,
             "period_unit": "month",
             "selected_period": months,
@@ -136,12 +136,11 @@ class MallInformationService:
     """
     Mall information business logic service.
     """
-
-    def get_mall_info_by_product(self, product_id: int) -> List[MallInformationModel]:
-        """Get all mall information for a product."""
+    def get_mall_info_by_code(self, product_code: str) -> List[MallInformationModel]:
+        """제품 코드(danawa_product_id)를 사용하여 판매처 정보를 조회합니다."""
         return list(
             MallInformationModel.objects.filter(
-                product_id=product_id,
+                product__danawa_product_id=product_code, # PK가 아닌 코드로 필터링
                 deleted_at__isnull=True
             ).order_by('current_price')
         )
