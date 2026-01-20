@@ -264,7 +264,7 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 
 # Embedding Settings
-EMBEDDING_MODEL = 'text-embedding-ada-002'
+EMBEDDING_MODEL = 'text-embedding-3-small'
 EMBEDDING_DIMENSIONS = 1536
 
 # Logging
