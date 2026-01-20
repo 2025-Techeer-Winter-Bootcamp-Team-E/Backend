@@ -4,7 +4,7 @@ Products module serializers.
 from rest_framework import serializers
 from .models import ProductModel, MallInformationModel
 from modules.timers.models import PriceHistoryModel
-
+from modules.orders.models import ReviewModel
 class MallInformationSerializer(serializers.ModelSerializer):
     """Serializer for mall information."""
 
@@ -126,3 +126,24 @@ class ProductPriceTrendSerializer(serializers.Serializer):
     period_unit = serializers.CharField(default="month")
     selected_period = serializers.IntegerField()
     price_history = PriceHistorySerializer(many=True)
+
+class ReviewDetailSerializer(serializers.ModelSerializer):
+    review_id = serializers.IntegerField(source='id') # 모델의 PK 
+    author_name = serializers.CharField(source='reviewer_name')
+    
+    class Meta:
+        model = ReviewModel
+        fields = [
+            'review_id', 
+            'review_images', 
+            'author_name', 
+            'rating', 
+            'content', 
+            'created_at'
+        ]
+
+class ReviewListResponseSerializer(serializers.Serializer):
+    pagination = serializers.DictField(child=serializers.IntegerField())#리뷰 페이지 정보
+    average_rating = serializers.FloatField()     # 상품 전체 평점
+    reviews = ReviewDetailSerializer(many=True)    # 아까 만든 리뷰 개별 데이터 리스트
+    has_next = serializers.BooleanField()
