@@ -25,7 +25,7 @@ class MallInformationSerializer(serializers.ModelSerializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     """Serializer for product output."""
-
+    product_code = serializers.CharField(source='danawa_product_id', read_only=True)
     category_name = serializers.CharField(source='category.name', read_only=True, allow_null=True)
     mall_information = MallInformationSerializer(many=True, read_only=True)
 
@@ -33,7 +33,8 @@ class ProductSerializer(serializers.ModelSerializer):
         model = ProductModel
         fields = [
             'id',
-            'danawa_product_id',
+            #'danawa_product_id', 'product_code'로 대체
+            'product_code',
             'name',
             'lowest_price',
             'brand',
@@ -120,7 +121,7 @@ class PriceHistorySerializer(serializers.ModelSerializer):
 
 #가격 추이 시리얼 라이저(기간)       
 class ProductPriceTrendSerializer(serializers.Serializer):
-    product_id = serializers.IntegerField()
+    product_code = serializers.IntegerField()
     product_name = serializers.CharField()
     period_unit = serializers.CharField(default="month")
     selected_period = serializers.IntegerField()
