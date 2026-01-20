@@ -41,7 +41,8 @@
       "Bash(__NEW_LINE_a3bf731da7bfbb54__ echo \"\")",
       "Bash(docker compose:*)",
       "Bash(git reset:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(docker cp:*)"
     ]
   }
 }
