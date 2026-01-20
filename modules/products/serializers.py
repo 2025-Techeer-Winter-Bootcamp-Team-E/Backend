@@ -2,9 +2,8 @@
 Products module serializers.
 """
 from rest_framework import serializers
-
 from .models import ProductModel, MallInformationModel
-
+from modules.timers.models import PriceHistoryModel
 
 class MallInformationSerializer(serializers.ModelSerializer):
     """Serializer for mall information."""
@@ -61,14 +60,14 @@ class ProductListSerializer(serializers.ModelSerializer):
             'id',
             'danawa_product_id',
             'name',
-            'lowest_price',
+            'lowest_price', 
             'brand',
             'product_status',
             'category',
             'category_name',
             'created_at',
         ]
-
+        read_only_fields = ['id', 'created_at']
 
 class ProductCreateSerializer(serializers.Serializer):
     """Serializer for product creation."""
@@ -94,7 +93,7 @@ class ProductUpdateSerializer(serializers.Serializer):
     product_status = serializers.CharField(max_length=20, required=False, allow_blank=True)
     category_id = serializers.IntegerField(required=False, allow_null=True)
 
-
+#
 class MallInformationCreateSerializer(serializers.Serializer):
     """Serializer for creating mall information."""
 
@@ -108,3 +107,21 @@ class MallInformationCreateSerializer(serializers.Serializer):
         required=False,
         default=list
     )
+
+#과거 가격 시리얼 라이저(일 단위)
+class PriceHistorySerializer(serializers.ModelSerializer):
+    data =serializers.DateTimeField(source='recorded_at', format='%Y-%m-%d')
+    price =serializers.IntegerField(source='lowest_price')
+
+    class Meta:
+        model=PriceHistoryModel
+        fields=['data','price']
+
+
+#가격 추이 시리얼 라이저(기간)       
+class ProductPriceTrendSerializer(serializers.Serializer):
+    product_id = serializers.IntegerField()
+    product_name = serializers.CharField()
+    period_unit = serializers.CharField(default="month")
+    selected_period = serializers.IntegerField()
+    price_history = PriceHistorySerializer(many=True)
