@@ -42,7 +42,8 @@
       "Bash(docker compose:*)",
       "Bash(git reset:*)",
       "Bash(git add:*)",
-      "Bash(docker cp:*)"
+      "Bash(docker cp:*)",
+      "Bash(docker restart:*)"
     ]
   }
 }
