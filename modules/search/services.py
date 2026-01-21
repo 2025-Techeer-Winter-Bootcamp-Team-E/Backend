@@ -5,6 +5,8 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
+from django.db.models import Count
+
 from .models import SearchModel, RecentViewProductModel
 
 logger = logging.getLogger(__name__)
@@ -30,10 +32,15 @@ class SearchService:
             danawa_product_id: Danawa product ID if applicable
         """
         from modules.products.services import ProductService
+        from modules.products.serializers import ProductListSerializer
         product_service = ProductService()
 
         # Perform search
-        results = product_service.search_products(query, limit=20)
+        product_results = product_service.search_products(query, limit=20)
+
+        # Serialize results
+        serializer = ProductListSerializer(product_results, many=True)
+        results = serializer.data
 
         # Record search history if user is logged in
         if user_id:
