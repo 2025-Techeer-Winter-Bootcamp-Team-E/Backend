@@ -39,6 +39,7 @@ class TimerListCreateView(APIView):
     @extend_schema(
         summary='적정 구매 타이머 조회',
         description='현재 가격의 저점/고점 판정 결과 및 정보 조회 (단일) 또는 사용자가 설정한 타이머 전체 조회 (user_id 파라미터 있으면)',
+        request=None,
         parameters=[
             OpenApiParameter(
                 name='user_id',
@@ -380,6 +381,7 @@ class TimerListCreateView(APIView):
     @extend_schema(
         summary='적정 구매 타이머 전체 조회',
         description='사용자가 설정한 타이머 전체 조회',
+        request=None,
         parameters=[
             OpenApiParameter(
                 name='user_id',
