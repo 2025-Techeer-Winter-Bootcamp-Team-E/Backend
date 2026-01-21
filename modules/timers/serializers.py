@@ -121,6 +121,21 @@ class TimerRetrieveSerializer(serializers.Serializer):
     predicted_at = serializers.DateTimeField()
 
 
+class TimerListItemSerializer(serializers.Serializer):
+    """Serializer for timer list item response."""
+    
+    timer_id = serializers.IntegerField()
+    product_code = serializers.CharField()
+    product_name = serializers.CharField()
+    target_price = serializers.IntegerField()
+    predicted_price = serializers.IntegerField()
+    confidence_score = serializers.FloatField()
+    recommendation_score = serializers.IntegerField()
+    thumbnail_url = serializers.CharField(allow_blank=True)
+    reason_message = serializers.CharField()
+    predicted_at = serializers.DateTimeField()
+
+
 class PriceHistorySerializer(serializers.ModelSerializer):
     """Serializer for price history."""
 
