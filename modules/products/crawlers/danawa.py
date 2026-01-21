@@ -548,64 +548,128 @@ class DanawaCrawler:
         return None
 
     def _parse_additional_images(self, soup: BeautifulSoup) -> List[str]:
-        """추가 이미지 URL 파싱."""
+        """추가 이미지 URL 파싱 (썸네일/갤러리 이미지)."""
         images = []
-        # 여러 가능한 선택자 시도
+        # 다나와 페이지의 여러 가능한 썸네일 선택자
         selectors = [
+            # 메인 썸네일 갤러리
+            '.thumb_list li img',
             '.thumb_list img',
+            '#thumbArea li img',
+            '#thumbArea img',
+            # 슬라이드 갤러리
             '.photo_slide li img',
             '.thumb_slide li img',
             '.photo_slide_in li img',
+            # 추가 이미지 영역
             '.add_thumb_list img',
+            '.add_photo img',
+            # 상품 이미지 영역
+            '.prod_thumb img',
+            '.prod_photo_list img',
+            '.photo_list li img',
+            # 대표 이미지 외 추가 이미지
+            '.photo_w .thumb img',
+            '.photo_w .add_img img',
         ]
         for selector in selectors:
             img_items = soup.select(selector)
-            for img in img_items[:10]:
-                src = img.get('src') or img.get('data-src')
+            for img in img_items[:15]:
+                src = img.get('src') or img.get('data-src') or img.get('data-original')
                 if src:
-                    url = src if src.startswith('http') else f"https:{src}"
-                    if url not in images:
+                    # URL 정규화
+                    if src.startswith('//'):
+                        url = f"https:{src}"
+                    elif not src.startswith('http'):
+                        url = f"https://img.danawa.com{src}"
+                    else:
+                        url = src
+                    # 플레이스홀더나 아이콘 제외
+                    if url not in images and 'icon' not in url.lower() and 'noimg' not in url.lower():
                         images.append(url)
             if images:
                 break
         return images
 
     def _parse_detail_page_images(self, soup: BeautifulSoup, pcode: str) -> List[str]:
-        """상세페이지 이미지 URL 파싱."""
+        """상세페이지 이미지 URL 파싱 (상품 상세 설명 이미지)."""
         images = []
-        # 여러 가능한 선택자 시도
+        # 다나와 상세페이지 이미지 선택자
         selectors = [
-            '.detail_cont img',
+            # 상세정보 탭 내 이미지
             '#detail_info img',
-            '.detail_img img',
+            '.detail_cont img',
+            '.detail_info img',
+            # 상품 상세 이미지 영역
             '.prod_detail img',
+            '.detail_img img',
+            '.prod_detail_info img',
+            # 제조사 제공 상세 이미지
+            '.maker_detail img',
+            '.mfr_detail img',
+            # 상품 설명 영역
+            '.prod_explain img',
+            '.explain_cont img',
+            # iframe 로드 영역 (있는 경우)
+            '.detail_area img',
+            '.info_cont img',
         ]
         for selector in selectors:
             detail_imgs = soup.select(selector)
-            for img in detail_imgs[:20]:
-                src = img.get('src') or img.get('data-src')
+            for img in detail_imgs[:30]:
+                src = img.get('src') or img.get('data-src') or img.get('data-original') or img.get('data-lazy')
                 if src:
-                    url = src if src.startswith('http') else f"https:{src}"
-                    if url not in images:
+                    # URL 정규화
+                    if src.startswith('//'):
+                        url = f"https:{src}"
+                    elif not src.startswith('http'):
+                        url = f"https://img.danawa.com{src}"
+                    else:
+                        url = src
+                    # 유효한 이미지 URL만 추가 (아이콘, 플레이스홀더 제외)
+                    if url not in images and 'icon' not in url.lower() and 'noimg' not in url.lower() and 'blank' not in url.lower():
                         images.append(url)
         return images
 
     def _parse_product_description_images(self, soup: BeautifulSoup) -> List[str]:
-        """제품설명 이미지 URL 파싱."""
+        """제품설명 이미지 URL 파싱 (제조사 제공 제품 설명 이미지)."""
         images = []
-        # 여러 가능한 선택자 시도
+        # 다나와 제품설명 이미지 선택자
         selectors = [
+            # 제품 설명/소개 영역
             '.prod_desc img',
+            '.prod_description img',
             '.prod_info_wrap img',
             '.prod_info img',
+            # 제조사 정보 영역
+            '.maker_info img',
+            '.brand_info img',
+            '.mfr_info img',
+            # 상품 특징 영역
+            '.prod_feature img',
+            '.feature_info img',
+            '.spec_info img',
+            # 상품 요약 정보 이미지
+            '.summary_info img',
+            '.prod_summary img',
+            # 메인 비주얼 이미지
+            '.main_visual img',
+            '.visual_area img',
         ]
         for selector in selectors:
             desc_imgs = soup.select(selector)
-            for img in desc_imgs[:10]:
-                src = img.get('src') or img.get('data-src')
+            for img in desc_imgs[:20]:
+                src = img.get('src') or img.get('data-src') or img.get('data-original') or img.get('data-lazy')
                 if src:
-                    url = src if src.startswith('http') else f"https:{src}"
-                    if url not in images:
+                    # URL 정규화
+                    if src.startswith('//'):
+                        url = f"https:{src}"
+                    elif not src.startswith('http'):
+                        url = f"https://img.danawa.com{src}"
+                    else:
+                        url = src
+                    # 유효한 이미지만 추가
+                    if url not in images and 'icon' not in url.lower() and 'noimg' not in url.lower() and 'blank' not in url.lower():
                         images.append(url)
         return images
 
@@ -775,24 +839,68 @@ class DanawaCrawler:
             mall_items = soup.select('#blog_content .diff_item')
 
             for item in mall_items:
-                # 판매처명 및 로고
-                mall_img = item.select_one('.d_mall img')
-                seller_name = mall_img.get('alt') if mall_img else None
+                # 판매처명 및 로고 (여러 선택자 시도)
+                seller_name = None
                 seller_logo = None
-                if mall_img:
-                    src = mall_img.get('src')
-                    seller_logo = f"https:{src}" if src and src.startswith('//') else src
 
-                # 가격 - .prc_line .price em.prc_c
+                # 로고 이미지에서 판매처명과 로고 URL 추출
+                logo_selectors = [
+                    '.d_mall img',
+                    '.mall_logo img',
+                    '.logo_area img',
+                    '.shop_logo img',
+                    '.seller_logo img',
+                    '.mall img',
+                ]
+                for selector in logo_selectors:
+                    mall_img = item.select_one(selector)
+                    if mall_img:
+                        seller_name = mall_img.get('alt') or mall_img.get('title')
+                        src = mall_img.get('src') or mall_img.get('data-src')
+                        if src:
+                            if src.startswith('//'):
+                                seller_logo = f"https:{src}"
+                            elif not src.startswith('http'):
+                                seller_logo = f"https://img.danawa.com{src}"
+                            else:
+                                seller_logo = src
+                        break
+
+                # 판매처명이 없으면 텍스트에서 추출
+                if not seller_name:
+                    name_selectors = ['.d_mall', '.mall_name', '.seller_name', '.shop_name']
+                    for selector in name_selectors:
+                        name_elem = item.select_one(selector)
+                        if name_elem:
+                            seller_name = name_elem.get_text(strip=True)
+                            if seller_name:
+                                break
+
+                # 가격 - 여러 선택자 시도
                 price = 0
-                price_elem = item.select_one('.prc_line .price em.prc_c, .prc_line em.prc_c')
-                if price_elem:
-                    price_text = price_elem.get_text(strip=True).replace(',', '').replace('원', '')
-                    price = int(price_text) if price_text.isdigit() else 0
+                price_selectors = [
+                    '.prc_line .price em.prc_c',
+                    '.prc_line em.prc_c',
+                    '.price_sect .price',
+                    '.price em',
+                    '.prc_t',
+                ]
+                for selector in price_selectors:
+                    price_elem = item.select_one(selector)
+                    if price_elem:
+                        price_text = price_elem.get_text(strip=True).replace(',', '').replace('원', '')
+                        if price_text.isdigit():
+                            price = int(price_text)
+                            break
 
                 # 판매페이지 URL
-                link_elem = item.select_one('a.link, a.priceCompareBuyLink')
-                seller_url = link_elem.get('href') if link_elem else None
+                link_selectors = ['a.link', 'a.priceCompareBuyLink', 'a.buy_link', 'a.go_mall']
+                seller_url = None
+                for selector in link_selectors:
+                    link_elem = item.select_one(selector)
+                    if link_elem:
+                        seller_url = link_elem.get('href')
+                        break
 
                 if seller_name and price > 0:
                     mall_list.append(MallInfo(
@@ -861,24 +969,68 @@ class DanawaCrawler:
 
             for item in mall_items:
                 try:
-                    # 판매처명 및 로고
-                    mall_img = item.select_one('.d_mall img')
-                    seller_name = mall_img.get('alt') if mall_img else None
+                    # 판매처명 및 로고 (여러 선택자 시도)
+                    seller_name = None
                     seller_logo = None
-                    if mall_img:
-                        src = mall_img.get('src')
-                        seller_logo = f"https:{src}" if src and src.startswith('//') else src
 
-                    # 가격 - .prc_line .price em.prc_c
+                    # 로고 이미지에서 판매처명과 로고 URL 추출
+                    logo_selectors = [
+                        '.d_mall img',
+                        '.mall_logo img',
+                        '.logo_area img',
+                        '.shop_logo img',
+                        '.seller_logo img',
+                        '.mall img',
+                    ]
+                    for selector in logo_selectors:
+                        mall_img = item.select_one(selector)
+                        if mall_img:
+                            seller_name = mall_img.get('alt') or mall_img.get('title')
+                            src = mall_img.get('src') or mall_img.get('data-src')
+                            if src:
+                                if src.startswith('//'):
+                                    seller_logo = f"https:{src}"
+                                elif not src.startswith('http'):
+                                    seller_logo = f"https://img.danawa.com{src}"
+                                else:
+                                    seller_logo = src
+                            break
+
+                    # 판매처명이 없으면 텍스트에서 추출
+                    if not seller_name:
+                        name_selectors = ['.d_mall', '.mall_name', '.seller_name', '.shop_name']
+                        for selector in name_selectors:
+                            name_elem = item.select_one(selector)
+                            if name_elem:
+                                seller_name = name_elem.get_text(strip=True)
+                                if seller_name:
+                                    break
+
+                    # 가격 - 여러 선택자 시도
                     price = 0
-                    price_elem = item.select_one('.prc_line .price em.prc_c, .prc_line em.prc_c')
-                    if price_elem:
-                        price_text = price_elem.get_text(strip=True).replace(',', '').replace('원', '')
-                        price = int(price_text) if price_text.isdigit() else 0
+                    price_selectors = [
+                        '.prc_line .price em.prc_c',
+                        '.prc_line em.prc_c',
+                        '.price_sect .price',
+                        '.price em',
+                        '.prc_t',
+                    ]
+                    for selector in price_selectors:
+                        price_elem = item.select_one(selector)
+                        if price_elem:
+                            price_text = price_elem.get_text(strip=True).replace(',', '').replace('원', '')
+                            if price_text.isdigit():
+                                price = int(price_text)
+                                break
 
                     # 판매페이지 URL
-                    link_elem = item.select_one('a.link, a.priceCompareBuyLink')
-                    seller_url = link_elem.get('href') if link_elem else None
+                    link_selectors = ['a.link', 'a.priceCompareBuyLink', 'a.buy_link', 'a.go_mall']
+                    seller_url = None
+                    for selector in link_selectors:
+                        link_elem = item.select_one(selector)
+                        if link_elem:
+                            seller_url = link_elem.get('href')
+                            break
 
                     if seller_name and price > 0:
                         mall_list.append(MallInfo(

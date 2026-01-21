@@ -850,6 +850,138 @@ def crawl_product_reviews(danawa_product_id: str) -> dict:
 
 
 # ============================================================
+# 이미지 크롤링 태스크
+# ============================================================
+
+@shared_task(name='products.update_mall_images')
+def update_mall_images(danawa_product_id: str) -> dict:
+    """
+    Selenium을 사용하여 특정 상품의 이미지 정보만 업데이트.
+
+    mall_information 테이블의 다음 필드를 업데이트:
+    - seller_logo_url (판매처 로고)
+    - product_description_image_url (제품설명 이미지)
+    - detail_page_image_url (상세페이지 이미지)
+    - additional_image_urls (추가 이미지)
+
+    Args:
+        danawa_product_id: 다나와 상품 ID
+
+    Returns:
+        결과 딕셔너리
+    """
+    from .crawlers import DanawaCrawler
+    from .models import ProductModel, MallInformationModel
+
+    try:
+        product = ProductModel.objects.get(
+            danawa_product_id=danawa_product_id,
+            deleted_at__isnull=True
+        )
+    except ProductModel.DoesNotExist:
+        return {'success': False, 'error': 'Product not found in DB'}
+
+    try:
+        with DanawaCrawler(delay_range=(0.5, 1)) as crawler:
+            # 쇼핑몰 가격 정보 (로고 URL 포함) 크롤링
+            mall_prices = crawler.get_mall_prices_with_selenium(danawa_product_id, limit=30)
+
+            # 이미지 크롤링
+            images = crawler.get_product_images_with_selenium(danawa_product_id)
+
+            # 기존 MallInformation 레코드 업데이트
+            updated_count = 0
+
+            if mall_prices:
+                for mall in mall_prices:
+                    MallInformationModel.objects.update_or_create(
+                        product=product,
+                        mall_name=mall.mall_name,
+                        defaults={
+                            'current_price': mall.price,
+                            'product_page_url': mall.product_url or '',
+                            'seller_logo_url': mall.logo_url or '',
+                            'representative_image_url': images.get('main_image') or '',
+                            'additional_image_urls': images.get('additional_images', []),
+                            'detail_page_image_url': ', '.join(images.get('detail_images', [])),
+                            'product_description_image_url': ', '.join(images.get('description_images', [])),
+                        }
+                    )
+                    updated_count += 1
+            else:
+                # 쇼핑몰 정보가 없을 경우 기존 레코드만 이미지 업데이트
+                existing_malls = MallInformationModel.objects.filter(
+                    product=product,
+                    deleted_at__isnull=True
+                )
+                for mall_info in existing_malls:
+                    mall_info.representative_image_url = images.get('main_image') or mall_info.representative_image_url
+                    mall_info.additional_image_urls = images.get('additional_images', []) or mall_info.additional_image_urls
+                    mall_info.detail_page_image_url = ', '.join(images.get('detail_images', [])) or mall_info.detail_page_image_url
+                    mall_info.product_description_image_url = ', '.join(images.get('description_images', [])) or mall_info.product_description_image_url
+                    mall_info.save()
+                    updated_count += 1
+
+            logger.info(f"Updated images for product {danawa_product_id}: {updated_count} mall records")
+
+            return {
+                'success': True,
+                'product_id': product.id,
+                'updated_count': updated_count,
+                'images': {
+                    'main': bool(images.get('main_image')),
+                    'additional': len(images.get('additional_images', [])),
+                    'detail': len(images.get('detail_images', [])),
+                    'description': len(images.get('description_images', [])),
+                }
+            }
+
+    except Exception as e:
+        logger.error(f"Error updating images for {danawa_product_id}: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+@shared_task(name='products.update_all_mall_images')
+def update_all_mall_images() -> dict:
+    """
+    모든 상품의 이미지 정보 업데이트 (Selenium).
+
+    mall_information 테이블에서 이미지가 없는 상품들의 이미지를 크롤링합니다.
+
+    Returns:
+        결과 딕셔너리
+    """
+    from .models import ProductModel, MallInformationModel
+
+    # 이미지가 비어있는 상품들 조회
+    products_without_images = ProductModel.objects.filter(
+        deleted_at__isnull=True
+    ).exclude(
+        mall_information__additional_image_urls__len__gt=0  # JSONField에 값이 있는 경우 제외
+    ).values_list('danawa_product_id', flat=True).distinct()
+
+    product_ids = list(products_without_images)
+
+    if not product_ids:
+        # 이미지가 없는 상품이 없으면 전체 상품 대상으로 업데이트
+        product_ids = list(ProductModel.objects.filter(
+            deleted_at__isnull=True
+        ).values_list('danawa_product_id', flat=True))
+
+    count = 0
+    for product_id in product_ids:
+        update_mall_images.delay(product_id)
+        count += 1
+
+    logger.info(f"Queued {count} products for image update")
+
+    return {
+        'success': True,
+        'queued_count': count,
+    }
+
+
+# ============================================================
 # 임베딩 태스크
 # ============================================================
 
