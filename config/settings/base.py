@@ -210,7 +210,6 @@ SPECTACULAR_SETTINGS = {
         {'name': 'Users', 'description': '회원관리 및 인증 endpoints'},
         {'name': 'Products', 'description': '상품 관리 endpoints'},
         {'name': 'Orders', 'description': '주문 관리 endpoints'},
-        {'name': 'Cart', 'description': '장바구니 endpoints'},
         {'name': 'Categories', 'description': '카테고리 관리 endpoints'},
         {'name': 'Search', 'description': '검색 endpoints'},
         {'name': 'Timers', 'description': '가격 타이머 및 알림 endpoints'},
