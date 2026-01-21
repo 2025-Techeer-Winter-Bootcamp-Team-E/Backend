@@ -48,13 +48,13 @@ class CartService:
     def add_item(
         self,
         cart_id: int,
-        product_id: int,
+        danawa_product_id: str,
         quantity: int = 1,
     ) -> CartItemModel:
         """Add item to cart."""
         cart_item, created = CartItemModel.objects.get_or_create(
             cart_id=cart_id,
-            product_id=product_id,
+            product_id=danawa_product_id,
             deleted_at__isnull=True,
             defaults={'quantity': quantity}
         )
@@ -89,12 +89,12 @@ class CartService:
         except CartItemModel.DoesNotExist:
             raise CartNotFoundError(f"Cart {cart_id}")
 
-    def remove_item(self, cart_id: int, product_id: int) -> bool:
+    def remove_item(self, cart_id: int, danawa_product_id: str) -> bool:
         """Remove item from cart (soft delete)."""
         try:
             cart_item = CartItemModel.objects.get(
                 cart_id=cart_id,
-                product_id=product_id,
+                product_id=danawa_product_id,
                 deleted_at__isnull=True
             )
             cart_item.deleted_at = datetime.now()
@@ -230,7 +230,7 @@ class OrderHistoryService:
     def purchase_with_tokens(
         self,
         user_id: int,
-        product_id: int,
+        product_code: str,
         quantity: int,
         total_price: int,
     ) -> tuple[OrderModel, int, 'ProductModel']:
@@ -239,7 +239,7 @@ class OrderHistoryService:
         
         Args:
             user_id: User ID
-            product_id: Product ID
+            product_code: Product code (danawa_product_id)
             quantity: Quantity to purchase
             total_price: Total price in tokens
             
@@ -264,9 +264,9 @@ class OrderHistoryService:
         
         # Get product
         try:
-            product = ProductModel.objects.get(id=product_id, deleted_at__isnull=True)
+            product = ProductModel.objects.get(danawa_product_id=product_code, deleted_at__isnull=True)
         except ProductModel.DoesNotExist:
-            raise OrderNotFoundError(f"Product {product_id}")
+            raise OrderNotFoundError(f"Product {product_code}")
         
         # Deduct tokens
         new_balance = current_balance - total_price

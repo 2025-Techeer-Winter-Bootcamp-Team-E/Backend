@@ -10,7 +10,7 @@ class CartItemSerializer(serializers.Serializer):
     """Serializer for cart item output."""
     id = serializers.IntegerField(read_only=True)
     cart_id = serializers.IntegerField(read_only=True)
-    product_id = serializers.IntegerField(read_only=True)
+    product_code = serializers.CharField(read_only=True)
     quantity = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
@@ -18,7 +18,7 @@ class CartItemSerializer(serializers.Serializer):
 
 class CartItemCreateSerializer(serializers.Serializer):
     """Serializer for adding item to cart."""
-    product_id = serializers.IntegerField()
+    product_code = serializers.CharField(max_length=15)
     quantity = serializers.IntegerField(min_value=1, default=1)
 
 
@@ -110,7 +110,7 @@ class TokenRechargeSerializer(serializers.Serializer):
 
 class TokenPurchaseSerializer(serializers.Serializer):
     """Serializer for token purchase request."""
-    product_id = serializers.IntegerField()
+    product_code = serializers.CharField(max_length=15)
     quantity = serializers.IntegerField(min_value=1)
     total_price = serializers.IntegerField(min_value=0)
 
