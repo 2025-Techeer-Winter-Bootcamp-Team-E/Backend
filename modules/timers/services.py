@@ -90,12 +90,24 @@ class TimerService:
         """Create a new price timer using AI."""
         # Get historical data
         history = self._get_price_history(danawa_product_id)
+        
+        # Get current price from product
+        from modules.products.models import ProductModel
+        try:
+            product = ProductModel.objects.get(
+                danawa_product_id=danawa_product_id,
+                deleted_at__isnull=True
+            )
+            current_price = product.lowest_price
+        except ProductModel.DoesNotExist:
+            current_price = target_price  # 상품이 없으면 target_price 사용
 
         # Calculate prediction
         predicted_price, confidence, suitability_score, guide_message = self._calculate_prediction(
             target_price,
             history,
-            prediction_date
+            prediction_date,
+            current_price
         )
 
         timer = TimerModel.objects.create(
@@ -234,16 +246,146 @@ class TimerService:
         self,
         target_price: int,
         history: List[PriceHistoryModel],
+        prediction_date: datetime,
+        current_price: int = None
+    ) -> tuple:
+        """
+        Calculate predicted price and purchase guidance using XGBoost.
+        
+        XGBoost를 활용한 기본적인 가격 예측 모델입니다.
+        가격 이력 데이터를 특징으로 변환하여 예측합니다.
+        """
+        try:
+            import xgboost as xgb
+            import numpy as np
+            import pandas as pd
+        except ImportError:
+            logger.warning("XGBoost not available, falling back to simple average")
+            return self._simple_prediction_fallback(target_price, history, prediction_date, current_price)
+
+        if not history or len(history) < 3:
+            # 데이터가 부족한 경우 간단한 예측 사용
+            return self._simple_prediction_fallback(target_price, history, prediction_date, current_price)
+
+        try:
+            # 가격 이력 데이터 준비
+            prices = [h.lowest_price for h in history]
+            dates = [h.recorded_at for h in history]
+            
+            # DataFrame 생성
+            df = pd.DataFrame({
+                'price': prices,
+                'date': dates
+            })
+            df = df.sort_values('date')
+            df['date'] = pd.to_datetime(df['date'])
+            
+            # 특징(feature) 생성
+            features = []
+            target = []
+            
+            # 시계열 윈도우 크기 (최근 7일 데이터 사용)
+            window_size = min(7, len(df) - 1)
+            
+            for i in range(window_size, len(df)):
+                window_prices = df['price'].iloc[i-window_size:i].values
+                
+                # 특징 추출
+                feature_row = [
+                    window_prices[-1],  # 최신 가격
+                    np.mean(window_prices),  # 평균 가격
+                    np.std(window_prices) if len(window_prices) > 1 else 0,  # 표준편차
+                    window_prices[-1] - window_prices[0] if len(window_prices) > 1 else 0,  # 가격 변화
+                    (window_prices[-1] - np.mean(window_prices)) / np.mean(window_prices) if np.mean(window_prices) > 0 else 0,  # 평균 대비 편차율
+                    df['date'].iloc[i].dayofweek,  # 요일
+                    df['date'].iloc[i].day,  # 일
+                ]
+                
+                features.append(feature_row)
+                target.append(df['price'].iloc[i])
+            
+            if len(features) < 2:
+                return self._simple_prediction_fallback(target_price, history, prediction_date)
+            
+            # XGBoost 모델 학습
+            X = np.array(features)
+            y = np.array(target)
+            
+            model = xgb.XGBRegressor(
+                n_estimators=50,
+                max_depth=3,
+                learning_rate=0.1,
+                random_state=42,
+                objective='reg:squarederror'
+            )
+            model.fit(X, y)
+            
+            # 예측을 위한 최신 특징 생성
+            recent_prices = df['price'].iloc[-window_size:].values
+            days_ahead = (prediction_date.date() - timezone.now().date()).days
+            days_ahead = max(1, min(days_ahead, 30))  # 1~30일 범위로 제한
+            
+            prediction_feature = [
+                recent_prices[-1],  # 최신 가격
+                np.mean(recent_prices),  # 평균 가격
+                np.std(recent_prices) if len(recent_prices) > 1 else 0,  # 표준편차
+                recent_prices[-1] - recent_prices[0] if len(recent_prices) > 1 else 0,  # 가격 변화
+                (recent_prices[-1] - np.mean(recent_prices)) / np.mean(recent_prices) if np.mean(recent_prices) > 0 else 0,  # 평균 대비 편차율
+                prediction_date.weekday(),  # 예측일 요일
+                prediction_date.day,  # 예측일 일
+            ]
+            
+            # 예측 수행
+            predicted_price = model.predict(np.array([prediction_feature]))[0]
+            predicted_price = max(0, int(predicted_price))  # 음수 방지
+            
+            # 시간이 지날수록 신뢰도 감소
+            confidence = max(0.5, 0.95 - (days_ahead * 0.02))
+            
+            # 구매 적합도 점수 계산 (0-100)
+            if predicted_price <= target_price:
+                price_diff = target_price - predicted_price
+                discount_rate = (price_diff / target_price * 100) if target_price > 0 else 0
+                suitability_score = min(100, int(75 + discount_rate * 0.5))
+                
+                if discount_rate > 10:
+                    guide_message = "현재 역대 최저가에 근접한 저점 구간입니다. 구매를 강력 추천합니다."
+                elif discount_rate > 5:
+                    guide_message = "예측 가격이 목표가보다 낮습니다. 구매를 권장합니다."
+                else:
+                    guide_message = "예측 가격이 목표가와 유사합니다. 구매를 고려해볼 수 있습니다."
+            else:
+                price_diff = predicted_price - target_price
+                premium_rate = (price_diff / target_price * 100) if target_price > 0 else 0
+                suitability_score = max(0, int(50 - premium_rate * 0.5))
+                
+                if premium_rate > 10:
+                    guide_message = "예측 가격이 목표가보다 높습니다. 좀 더 기다려보세요."
+                else:
+                    guide_message = "예측 가격이 목표가보다 약간 높습니다. 관찰을 권장합니다."
+            
+            logger.info(
+                f"XGBoost prediction: target={target_price}, predicted={predicted_price}, "
+                f"confidence={confidence:.2f}, suitability={suitability_score}"
+            )
+            
+            return predicted_price, confidence, suitability_score, guide_message
+            
+        except Exception as e:
+            logger.error(f"XGBoost prediction failed: {str(e)}", exc_info=True)
+            # XGBoost 예측 실패 시 폴백 사용
+            return self._simple_prediction_fallback(target_price, history, prediction_date, current_price)
+    
+    def _simple_prediction_fallback(
+        self,
+        target_price: int,
+        history: List[PriceHistoryModel],
         prediction_date: datetime
     ) -> tuple:
         """
-        Calculate predicted price and purchase guidance.
-
-        TODO: Replace with actual ML model (e.g., LSTM, Prophet)
-        This is a simplified moving average approach.
+        간단한 이동 평균 기반 예측 (폴백)
         """
         if not history:
-            # No history, use target price as base
             return target_price, 0.5, 50, "가격 이력이 부족합니다. 더 많은 데이터가 필요합니다."
 
         prices = [h.lowest_price for h in history[-7:]] if len(history) >= 7 else [h.lowest_price for h in history]

@@ -97,6 +97,35 @@ def custom_exception_handler(exc, context):
             status=status.HTTP_403_FORBIDDEN
         )
     
+    # Handle DRF ValidationError (from serializer.is_valid(raise_exception=True))
+    from rest_framework.exceptions import ValidationError as DRFValidationError
+    if isinstance(exc, DRFValidationError):
+        # DRF ValidationError는 response.data에 필드별 에러 정보를 담고 있음
+        if response is not None and response.data:
+            # 필드별 에러가 있는 경우 ({"field": ["error message"]})
+            if isinstance(response.data, dict) and not 'detail' in response.data:
+                # 첫 번째 에러 메시지를 기본 메시지로 사용
+                first_error = list(response.data.values())[0] if response.data else []
+                error_message = first_error[0] if isinstance(first_error, list) and first_error else "잘못된 상품 번호이거나 필수 값이 누락되었습니다."
+                return Response(
+                    {
+                        'status': response.status_code,
+                        'message': error_message,
+                        'errors': response.data
+                    },
+                    status=response.status_code
+                )
+            # detail 키가 있는 경우
+            elif 'detail' in response.data:
+                error_message = response.data['detail']
+                return Response(
+                    {
+                        'status': response.status_code,
+                        'message': error_message
+                    },
+                    status=response.status_code
+                )
+    
     # Convert DRF's default error format to our format if response exists
     if response is not None and response.data:
         # Check if it's DRF's default error format (has 'detail' key)

@@ -1,6 +1,7 @@
 """
 Timers API views.
 """
+import logging
 from datetime import timedelta
 
 from rest_framework import status
@@ -11,10 +12,13 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter
 from django.utils import timezone
 
 from .services import TimerService, PriceHistoryService
+
+logger = logging.getLogger(__name__)
 from .serializers import (
     TimerSerializer,
     TimerListSerializer,
     TimerCreateSerializer,
+    TimerRetrieveSerializer,
     PriceHistorySerializer,
     PriceHistoryCreateSerializer,
     PriceTrendSerializer,
@@ -31,66 +35,194 @@ class TimerListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        summary='Get price timers',
-        parameters=[
-            OpenApiParameter(
-                name='danawa_product_id',
-                type=str,
-                required=False,
-                description='Danawa Product ID'
-            ),
-            OpenApiParameter(
-                name='days',
-                type=int,
-                required=False,
-                description='Number of days to predict (default: 7)'
-            ),
-        ],
-        responses={200: TimerListSerializer(many=True)},
+        summary='적정 구매 타이머 조회',
+        description='현재 가격의 저점/고점 판정 결과 및 정보 조회',
+        responses={
+            200: TimerRetrieveSerializer,
+            404: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 404,
+                    'message': '해당 예측 데이터를 찾을 수 없습니다.'
+                }
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 500,
+                    'message': 'AI 분석 모델 응답 처리 중 오류가 발생했습니다.'
+                }
+            }
+        },
     )
     def get(self, request):
-        """Get timers for a product or current user."""
-        danawa_product_id = request.query_params.get('danawa_product_id')
-        days = int(request.query_params.get('days', 7))
-
-        if danawa_product_id:
-            timers = timer_service.get_timers_for_product(
-                danawa_product_id=danawa_product_id,
-                days=days
-            )
-        else:
+        """적정 구매 타이머 조회 - 현재 가격의 저점/고점 판정 결과 및 정보 조회"""
+        try:
+            # 사용자의 가장 최근 타이머 조회
             timers = timer_service.get_user_timers(
-                user_id=request.user.id
+                user_id=request.user.id,
+                offset=0,
+                limit=1
             )
-
-        serializer = TimerListSerializer(timers, many=True)
-        return Response(serializer.data)
+            
+            if not timers:
+                return Response(
+                    {
+                        'status': 404,
+                        'message': '해당 예측 데이터를 찾을 수 없습니다.'
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            timer = timers[0]
+            
+            # 상품 정보 조회
+            from modules.products.models import ProductModel
+            try:
+                product = ProductModel.objects.select_related().prefetch_related('mall_information').get(
+                    danawa_product_id=timer.danawa_product_id,
+                    deleted_at__isnull=True
+                )
+            except ProductModel.DoesNotExist:
+                return Response(
+                    {
+                        'status': 404,
+                        'message': '해당 예측 데이터를 찾을 수 없습니다.'
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # 대표 이미지 URL 가져오기
+            thumbnail_url = ''
+            try:
+                mall_info = product.mall_information.filter(
+                    deleted_at__isnull=True
+                ).first()
+                if mall_info and mall_info.representative_image_url:
+                    thumbnail_url = mall_info.representative_image_url
+            except Exception:
+                pass
+            
+            # confidence_score를 퍼센트로 변환 (0.925 -> 92.5)
+            confidence_percent = (timer.confidence_score * 100) if timer.confidence_score else 0
+            
+            data = {
+                'product_code': timer.danawa_product_id,
+                'product_name': product.name,
+                'target_price': timer.target_price,
+                'predicted_price': timer.predicted_price or 0,
+                'confidence_score': round(confidence_percent, 1),
+                'recommendation_score': timer.purchase_suitability_score or 0,
+                'thumbnail_url': thumbnail_url,
+                'reason_message': timer.purchase_guide_message or '',
+                'predicted_at': timer.prediction_date or timer.created_at,
+            }
+            
+            serializer = TimerRetrieveSerializer(data)
+            return Response(
+                {
+                    'status': 200,
+                    'data': serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"타이머 조회 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': 'AI 분석 모델 응답 처리 중 오류가 발생했습니다.'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @extend_schema(
-        summary='Create price timer',
+        summary='적정 구매 타이머 등록',
+        description='상품 상세에서 적정 구매 타이머 설정',
         request=TimerCreateSerializer,
-        responses={201: TimerSerializer},
+        responses={
+            201: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'object',
+                        'properties': {
+                            'timer_id': {'type': 'integer'},
+                        }
+                    }
+                },
+                'example': {
+                    'status': 201,
+                    'message': '타이머가 성공적으로 등록되었습니다.',
+                    'data': {'timer_id': 1}
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 400,
+                    'message': '잘못된 상품 번호이거나 필수 값이 누락되었습니다.'
+                }
+            },
+            401: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 401,
+                    'message': '로그인이 필요합니다.'
+                }
+            }
+        },
     )
     def post(self, request):
-        """Generate timer for a product."""
+        """
+        적정 구매 타이머 등록
+
+        Request Body:
+          - product_code: ProductModel.danawa_product_id (string/varchar(15))
+          - target_price: int
+        """
         serializer = TimerCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        danawa_product_id = serializer.validated_data['danawa_product_id']
-        target_price = serializer.validated_data['target_price']
-        prediction_days = serializer.validated_data['prediction_days']
-
-        # Create timer
+        product_code = str(serializer.validated_data["product_code"])
+        target_price = serializer.validated_data["target_price"]
+        
+        # 명세서에 없지만 예측에 필요한 값이므로 내부적으로 기본값 사용
+        prediction_days = 7  # 기본값: 7일 후 예측
         prediction_date = timezone.now() + timedelta(days=prediction_days)
         timer = timer_service.create_timer(
-            danawa_product_id=danawa_product_id,
+            danawa_product_id=product_code,
             user_id=request.user.id,
             target_price=target_price,
             prediction_date=prediction_date,
         )
 
-        result_serializer = TimerSerializer(timer)
-        return Response(result_serializer.data, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "status": 201,
+                "message": "타이머가 성공적으로 등록되었습니다.",
+                "data": {"timer_id": timer.id},
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 @extend_schema(tags=['Timers'])
