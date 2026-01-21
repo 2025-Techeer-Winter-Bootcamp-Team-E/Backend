@@ -70,6 +70,25 @@ class TimerCreateSerializer(serializers.Serializer):
         return value
 
 
+class TimerUpdateSerializer(serializers.Serializer):
+    """Serializer for updating timer target price."""
+    
+    target_price = serializers.IntegerField(min_value=0, error_messages={
+        'invalid': '유효하지 않은 가격 형식입니다.',
+        'min_value': '유효하지 않은 가격 형식입니다.',
+        'required': '유효하지 않은 가격 형식입니다.',
+        'null': '유효하지 않은 가격 형식입니다.',
+    })
+    
+    def validate_target_price(self, value):
+        """Validate target price format."""
+        if value is None:
+            raise serializers.ValidationError("유효하지 않은 가격 형식입니다.")
+        if value < 0:
+            raise serializers.ValidationError("유효하지 않은 가격 형식입니다.")
+        return value
+
+
 class TimerListSerializer(serializers.ModelSerializer):
     """Simplified serializer for timer list."""
 

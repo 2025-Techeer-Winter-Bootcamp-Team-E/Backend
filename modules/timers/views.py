@@ -18,6 +18,7 @@ from .serializers import (
     TimerSerializer,
     TimerListSerializer,
     TimerCreateSerializer,
+    TimerUpdateSerializer,
     TimerRetrieveSerializer,
     PriceHistorySerializer,
     PriceHistoryCreateSerializer,
@@ -252,6 +253,89 @@ class TimerDetailView(APIView):
 
         serializer = TimerSerializer(timer)
         return Response(serializer.data)
+
+    @extend_schema(
+        summary='타이머 수정',
+        description='타이머 목표 가격 수정',
+        request=TimerUpdateSerializer,
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 200,
+                    'message': '수정이 완료되었습니다.'
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 400,
+                    'message': '유효하지 않은 가격 형식입니다.'
+                }
+            },
+            403: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 403,
+                    'message': '본인의 타이머만 수정할 수 있습니다.'
+                }
+            },
+            404: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                }
+            }
+        },
+    )
+    def patch(self, request, timer_id: int):
+        """Update timer target price."""
+        timer = timer_service.get_timer_by_id(timer_id)
+        if not timer:
+            return Response(
+                {
+                    'status': 404,
+                    'message': '타이머를 찾을 수 없습니다.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check ownership
+        if timer.user_id != request.user.id and not request.user.is_staff:
+            return Response(
+                {
+                    'status': 403,
+                    'message': '본인의 타이머만 수정할 수 있습니다.'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = TimerUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        target_price = serializer.validated_data['target_price']
+        timer_service.update_timer(timer_id, target_price=target_price)
+
+        return Response(
+            {
+                'status': 200,
+                'message': '수정이 완료되었습니다.'
+            },
+            status=status.HTTP_200_OK
+        )
 
     @extend_schema(
         summary='Delete timer',

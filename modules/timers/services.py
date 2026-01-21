@@ -90,24 +90,12 @@ class TimerService:
         """Create a new price timer using AI."""
         # Get historical data
         history = self._get_price_history(danawa_product_id)
-        
-        # Get current price from product
-        from modules.products.models import ProductModel
-        try:
-            product = ProductModel.objects.get(
-                danawa_product_id=danawa_product_id,
-                deleted_at__isnull=True
-            )
-            current_price = product.lowest_price
-        except ProductModel.DoesNotExist:
-            current_price = target_price  # 상품이 없으면 target_price 사용
 
         # Calculate prediction
         predicted_price, confidence, suitability_score, guide_message = self._calculate_prediction(
             target_price,
             history,
-            prediction_date,
-            current_price
+            prediction_date
         )
 
         timer = TimerModel.objects.create(
@@ -132,12 +120,16 @@ class TimerService:
     def update_timer(
         self,
         timer_id: int,
+        target_price: int = None,
         is_notification_enabled: bool = None,
     ) -> TimerModel:
         """Update a timer."""
         timer = self.get_timer_by_id(timer_id)
         if not timer:
             raise PredictionNotFoundError(str(timer_id))
+
+        if target_price is not None:
+            timer.target_price = target_price
 
         if is_notification_enabled is not None:
             timer.is_notification_enabled = is_notification_enabled
@@ -246,8 +238,7 @@ class TimerService:
         self,
         target_price: int,
         history: List[PriceHistoryModel],
-        prediction_date: datetime,
-        current_price: int = None
+        prediction_date: datetime
     ) -> tuple:
         """
         Calculate predicted price and purchase guidance using XGBoost.
@@ -261,11 +252,11 @@ class TimerService:
             import pandas as pd
         except ImportError:
             logger.warning("XGBoost not available, falling back to simple average")
-            return self._simple_prediction_fallback(target_price, history, prediction_date, current_price)
+            return self._simple_prediction_fallback(target_price, history, prediction_date)
 
         if not history or len(history) < 3:
             # 데이터가 부족한 경우 간단한 예측 사용
-            return self._simple_prediction_fallback(target_price, history, prediction_date, current_price)
+            return self._simple_prediction_fallback(target_price, history, prediction_date)
 
         try:
             # 가격 이력 데이터 준비
@@ -374,7 +365,7 @@ class TimerService:
         except Exception as e:
             logger.error(f"XGBoost prediction failed: {str(e)}", exc_info=True)
             # XGBoost 예측 실패 시 폴백 사용
-            return self._simple_prediction_fallback(target_price, history, prediction_date, current_price)
+            return self._simple_prediction_fallback(target_price, history, prediction_date)
     
     def _simple_prediction_fallback(
         self,
