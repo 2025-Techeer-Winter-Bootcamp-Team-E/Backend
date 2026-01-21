@@ -54,7 +54,7 @@ class CartItemListCreateView(APIView):
                             'type': 'object',
                             'properties': {
                                 'cart_item_id': {'type': 'integer'},
-                                'product_id': {'type': 'integer'},
+                                'product_code': {'type': 'string'},
                                 'product_name': {'type': 'string'},
                                 'product_resentative_image_url': {'type': 'string'},
                                 'quantity': {'type': 'integer'},
@@ -111,7 +111,7 @@ class CartItemListCreateView(APIView):
                 
                 result.append({
                     'cart_item_id': item.id,
-                    'product_id': product.id,
+                    'product_code': product.danawa_product_id,
                     'product_name': product.name,
                     'product_resentative_image_url': representative_image_url,
                     'quantity': item.quantity,
@@ -149,7 +149,7 @@ class CartItemListCreateView(APIView):
                         'type': 'object',
                         'properties': {
                             'cart_item_id': {'type': 'integer'},
-                            'product_id': {'type': 'integer'},
+                            'product_code': {'type': 'string'},
                             'quantity': {'type': 'integer'},
                             'added_at': {'type': 'string'},
                         }
@@ -160,7 +160,7 @@ class CartItemListCreateView(APIView):
                     'message': '장바구니에 상품을 담았습니다.',
                     'data': {
                         'cart_item_id': 1006,
-                        'product_id': 702,
+                        'product_code': '1234567890',
                         'quantity': 2,
                         'added_at': '2026-01-17T13:54:06'
                     }
@@ -198,13 +198,13 @@ class CartItemListCreateView(APIView):
             serializer.is_valid(raise_exception=True)
 
             data = serializer.validated_data
-            product_id = data['product_id']
+            product_code = data['product_code']
             quantity = data['quantity']
 
             # Check if product exists
             from modules.products.models import ProductModel
             try:
-                product = ProductModel.objects.get(id=product_id, deleted_at__isnull=True)
+                product = ProductModel.objects.get(danawa_product_id=product_code, deleted_at__isnull=True)
             except ProductModel.DoesNotExist:
                 return Response(
                     {
@@ -217,7 +217,7 @@ class CartItemListCreateView(APIView):
             cart = cart_service.get_or_create_cart(request.user.id)
             item = cart_service.add_item(
                 cart_id=cart.id,
-                product_id=product_id,
+                danawa_product_id=product.danawa_product_id,
                 quantity=quantity,
             )
 
@@ -229,7 +229,7 @@ class CartItemListCreateView(APIView):
                     'message': '장바구니에 상품을 담았습니다.',
                     'data': {
                         'cart_item_id': item.id,
-                        'product_id': product_id,
+                        'product_code': product_code,
                         'quantity': item.quantity,
                         'added_at': added_at,
                     }
@@ -291,10 +291,23 @@ class CartItemDeleteView(APIView):
         summary="Remove item from cart",
         description="장바구니에서 상품 삭제",
     )
-    def delete(self, request, product_id: int):
+    def delete(self, request, product_code: str):
         try:
+            # Check if product exists
+            from modules.products.models import ProductModel
+            try:
+                product = ProductModel.objects.get(danawa_product_id=product_code, deleted_at__isnull=True)
+            except ProductModel.DoesNotExist:
+                return Response(
+                    {
+                        'status': 404,
+                        'message': '해당 상품을 찾을 수 없습니다.',
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
             cart = cart_service.get_or_create_cart(request.user.id)
-            removed = cart_service.remove_item(cart.id, product_id)
+            removed = cart_service.remove_item(cart.id, product.danawa_product_id)
             
             if not removed:
                 return Response(
@@ -302,7 +315,7 @@ class CartItemDeleteView(APIView):
                         'status': 400,
                         'message': '잘못된 요청이거나 장바구니에 해당 상품이 없습니다.',
                     },
-                    status=status.HTTP_400_NOT_FOUND    
+                    status=status.HTTP_400_BAD_REQUEST    
                 )
             
             return Response(
@@ -641,14 +654,14 @@ class TokenPurchaseView(APIView):
         serializer = TokenPurchaseSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        product_id = serializer.validated_data['product_id']
+        product_code = serializer.validated_data['product_code']
         quantity = serializer.validated_data['quantity']
         total_price = serializer.validated_data['total_price']
 
         try:
             order, new_balance, product = order_history_service.purchase_with_tokens(
                 user_id=request.user.id,
-                product_id=product_id,
+                product_code=product_code,
                 quantity=quantity,
                 total_price=total_price,
             )
