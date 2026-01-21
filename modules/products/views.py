@@ -16,6 +16,7 @@ from .serializers import (
     ProductPriceTrendSerializer,
     MallInformationSerializer,
     MallInformationCreateSerializer,
+    ReviewListResponseSerializer,
 )
 
 
@@ -210,4 +211,41 @@ class ProductPriceTrendView(APIView):
             "status": 200,
             "data": serializer.data
         })
+@extend_schema(tags=['Products'])
+class ProductReviewListView(APIView):
+    permission_classes = [AllowAny]
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='page', description='페이지', required=False, type=int, default=1),
+            OpenApiParameter(name='size', description='리뷰 개수', required=False, type=int, default=5),
+        ]
+    )
+    def get(self, request, product_code):
+        try:
+            page = int(request.query_params.get('page', 1))
+            size = int(request.query_params.get('size', 5))
+        except Exception as e:
+            return Response({
+                "status":500,
+                "message":"리뷰 목록을 불러오는 중 서버 오류가 발생했습니다."
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+        result_data = ProductService.get_product_reviews(
+            product_code=product_code,
+            page=page,
+            size=size
+        )
+        if result_data == None:
+            return Response({
+                    "status": 404,
+                    "message": "해당 상품이 존재하지 않아 리뷰를 불러올 수 없습니다."
+                }, status=status.HTTP_404_NOT_FOUND)
+
+        # 3. 시리얼라이징 (데이터를 명세서 규격에 맞게 변환)
+        serializer = ReviewListResponseSerializer(result_data)
+
+        # 4. 최종 응답
+        return Response({
+            "status": 200,
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)   

@@ -5,12 +5,15 @@ from datetime import datetime
 from typing import Optional, List
 from django.utils import timezone
 from dateutil.relativedelta import relativedelta
-from django.db.models import Q
+from django.db import models
+from django.db.models import Q, Avg, Count
 from modules.timers.models import PriceHistoryModel
+from modules.orders.models import ReviewModel
 from .models import ProductModel, MallInformationModel
 from .exceptions import (
     ProductNotFoundError,
 )
+import math
 
 
 class ProductService:
@@ -131,6 +134,41 @@ class ProductService:
             "selected_period": months,
             "price_history": histories
         }
+    def get_product_reviews(product_code, page=1, size=5):
+
+        if not ProductModel.objects.filter(danawa_product_id=product_code).exists():
+            return None
+        
+        queryset = ReviewModel.objects.filter(
+            danawa_product_id=product_code,
+            deleted_at__isnull=True
+        )
+    
+        stats = queryset.aggregate(
+            total_elements=models.Count('id'),
+            average_rating=Avg('rating')
+        )
+        
+        total_elements = stats['total_elements'] or 0
+        average_rating = round(stats['average_rating'] or 0.0, 1) #평점 없을 경우 0점
+        start = (page - 1) * size
+        end = start + size
+        reviews = queryset.all()[start:end] 
+
+        total_pages = math.ceil(total_elements / size) if total_elements > 0 else 0
+        has_next = page < total_pages
+        
+        return {
+            "pagination": {
+                "current_page": page,
+                "size": size,
+                "total_elements": total_elements,
+                "total_pages": total_pages
+            },
+            "average_rating": average_rating,
+            "reviews": reviews,
+            "has_next": has_next 
+        }
 
 class MallInformationService:
     """
@@ -182,3 +220,4 @@ class MallInformationService:
             return mall_info
         except MallInformationModel.DoesNotExist:
             return None
+
