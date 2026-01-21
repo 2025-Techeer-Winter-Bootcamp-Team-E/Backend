@@ -48,6 +48,45 @@ class ProductService:
             queryset = queryset.filter(category_id=category_id)
         return list(queryset.order_by('-created_at')[offset:offset + limit])
 
+    def search_products(
+        self,
+        query: str,
+        category_id: int = None,
+        limit: int = 20,
+    ) -> List[ProductModel]:
+        """
+        Search products by name, brand, or specifications.
+
+        Args:
+            query: Search query string
+            category_id: Optional category filter
+            limit: Maximum number of results
+
+        Returns:
+            List of matching ProductModel instances
+        """
+        if not query or len(query.strip()) < 1:
+            return []
+
+        query = query.strip()
+
+        # Build search filter using Q objects
+        search_filter = Q(deleted_at__isnull=True) & (
+            Q(name__icontains=query) |
+            Q(brand__icontains=query)
+        )
+
+        # Add category filter if provided
+        if category_id:
+            search_filter &= Q(category_id=category_id)
+
+        # Execute search query
+        results = ProductModel.objects.filter(search_filter).order_by(
+            '-review_count',  # Popular products first
+            '-created_at'
+        )[:limit]
+
+        return list(results)
 
     def search_by_embedding(
         self,

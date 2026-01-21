@@ -3,13 +3,14 @@ Search URL configuration.
 """
 from django.urls import path
 from .views import (
-    SearchView, 
-    SearchHistoryView, 
-    RecentViewProductsView, 
+    SearchView,
+    SearchHistoryView,
+    RecentViewProductsView,
     RecentViewProductDeleteView,
     AutocompleteView,
     PopularSearchView,
-    RecentSearchView
+    RecentSearchView,
+    LLMRecommendationView,
 )
 app_name = 'search'
 
@@ -24,4 +25,7 @@ urlpatterns = [
     path('popular/', PopularSearchView.as_view(), name='popular-search'),
 
     path('recent/', RecentSearchView.as_view(), name='search-recent'),
+
+    # LLM 기반 상품 추천 검색
+    path('llm-recommendation/', LLMRecommendationView.as_view(), name='llm-recommendation'),
 ]

@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse # OpenApiResponse 추가
 
 from .services import SearchService, RecentViewProductService
+from .llm_service import LLMRecommendationService
 from .serializers import (
     SearchQuerySerializer,
     SearchResultSerializer,
@@ -16,8 +17,10 @@ from .serializers import (
     RecentViewProductCreateSerializer,
     AutocompleteResponseSerializer,
     PopularTermsResponseSerializer,
-    RecentSearchSerializer, 
-    RecentSearchResponseSerializer
+    RecentSearchSerializer,
+    RecentSearchResponseSerializer,
+    LLMRecommendationRequestSerializer,
+    LLMRecommendationResponseSerializer,
 )
 
 class SearchView(APIView):
@@ -181,3 +184,58 @@ class RecentSearchView(APIView):
                 "recent_terms": serializer.data
             }
         }, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=['Search'])
+class LLMRecommendationView(APIView):
+    """
+    LLM 기반 상품 추천 검색 API.
+
+    자연어 쿼리를 분석하여 의도(Intent)를 추출하고,
+    HNSW(벡터) + GIN(키워드) 하이브리드 검색으로 최적의 상품 5개를 추천합니다.
+    """
+    permission_classes = [IsAuthenticated]
+    llm_service = LLMRecommendationService()
+    search_service = SearchService()
+
+    @extend_schema(
+        summary='LLM 기반 상품 추천 검색',
+        description='자연어 쿼리를 분석하여 의도를 추출하고, 하이브리드 검색으로 최적의 상품 5개를 추천합니다.',
+        request=LLMRecommendationRequestSerializer,
+        responses={
+            200: LLMRecommendationResponseSerializer,
+            401: OpenApiResponse(description='로그인이 필요합니다.'),
+            500: OpenApiResponse(description='AI 분석 또는 벡터 검색 과정에서 오류가 발생했습니다.'),
+        },
+    )
+    def post(self, request):
+        # 1. 요청 검증
+        serializer = LLMRecommendationRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_query = serializer.validated_data['user_query']
+
+        try:
+            # 2. LLM 추천 서비스 호출
+            result = self.llm_service.get_recommendations(user_query)
+
+            # 3. 검색 기록 저장 (search_mode='llm')
+            self.search_service.record_search(
+                user_id=request.user.id,
+                query=user_query,
+                search_mode='llm',
+                danawa_product_id=''
+            )
+
+            # 4. 응답 반환
+            return Response({
+                "status": 200,
+                "message": "추천 검색 성공",
+                "data": result
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                "status": 500,
+                "message": "AI 분석 또는 벡터 검색 과정에서 오류가 발생했습니다.",
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

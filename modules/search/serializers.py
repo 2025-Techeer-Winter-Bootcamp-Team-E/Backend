@@ -117,3 +117,51 @@ class RecentSearchResponseSerializer(serializers.Serializer):
     status = serializers.IntegerField(default=200)
     message = serializers.CharField(default="검색어 목록 조회 성공")
     data = serializers.DictField() # {"recent_terms": [...]} 형태
+
+
+# LLM 기반 상품 추천 검색 시리얼라이저
+class LLMRecommendationRequestSerializer(serializers.Serializer):
+    """LLM 추천 검색 요청 시리얼라이저"""
+    user_query = serializers.CharField(
+        min_length=5,
+        max_length=500,
+        help_text='자연어로 된 사용자 검색 쿼리 (예: "전공 서적 많이 들고 다니는 컴공생인데...")'
+    )
+
+
+class ProductSpecSerializer(serializers.Serializer):
+    """상품 스펙 시리얼라이저"""
+    cpu = serializers.CharField(allow_null=True, help_text='CPU 정보')
+    ram = serializers.CharField(allow_null=True, help_text='RAM 용량')
+    storage = serializers.CharField(allow_null=True, help_text='저장장치 용량')
+    display = serializers.CharField(allow_null=True, help_text='디스플레이 크기')
+    weight = serializers.CharField(allow_null=True, help_text='무게')
+    gpu = serializers.CharField(allow_null=True, help_text='GPU 정보')
+    battery = serializers.CharField(allow_null=True, help_text='배터리 용량')
+
+
+class RecommendedProductSerializer(serializers.Serializer):
+    """추천 상품 시리얼라이저"""
+    product_code = serializers.CharField(help_text='다나와 상품 고유 코드')
+    name = serializers.CharField(help_text='상품명')
+    brand = serializers.CharField(help_text='브랜드/제조사')
+    price = serializers.IntegerField(help_text='최저가')
+    thumbnail_url = serializers.CharField(allow_null=True, help_text='썸네일 이미지 URL')
+    product_detail_url = serializers.CharField(allow_null=True, help_text='상품 상세 페이지 URL')
+    recommendation_reason = serializers.CharField(help_text='AI 추천 사유')
+    specs = ProductSpecSerializer(help_text='주요 스펙 정보')
+    review_count = serializers.IntegerField(help_text='리뷰 수')
+    review_rating = serializers.FloatField(allow_null=True, help_text='평균 별점')
+
+
+class LLMRecommendationDataSerializer(serializers.Serializer):
+    """LLM 추천 응답 데이터 시리얼라이저"""
+    analysis_message = serializers.CharField(help_text='AI 분석 메시지')
+    recommended_products = RecommendedProductSerializer(many=True, help_text='추천 상품 목록 (5개)')
+
+
+class LLMRecommendationResponseSerializer(serializers.Serializer):
+    """LLM 추천 검색 응답 시리얼라이저"""
+    status = serializers.IntegerField(default=200, help_text='응답 상태 코드')
+    message = serializers.CharField(default="추천 검색 성공", help_text='응답 메시지')
+    data = LLMRecommendationDataSerializer(help_text='추천 결과 데이터')
