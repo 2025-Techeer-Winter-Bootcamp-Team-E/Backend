@@ -7,13 +7,14 @@ from modules.timers.models import PriceHistoryModel
 from modules.orders.models import ReviewModel
 class MallInformationSerializer(serializers.ModelSerializer):
     """Serializer for mall information."""
+    price = serializers.IntegerField(source='current_price')
 
     class Meta:
         model = MallInformationModel
         fields = [
             'id',
             'mall_name',
-            'current_price',
+            'price',
             'product_page_url',
             'seller_logo_url',
             'representative_image_url',
@@ -50,6 +51,81 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
+class ProductDetailSerializer(serializers.ModelSerializer):
+    """상품 상세 정보 Serializer (API 명세서 규격)"""
+    product_code = serializers.SerializerMethodField()
+    product_name = serializers.CharField(source='name')
+    specs = serializers.SerializerMethodField()
+    price = serializers.IntegerField(source='lowest_price')
+    category = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+    product_image_url_list = serializers.SerializerMethodField()
+    product_detail_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductModel
+        fields = [
+            'product_code',
+            'product_name',
+            'brand',
+            'specs',
+            'price',
+            'category',
+            'thumbnail_url',
+            'product_image_url_list',
+            'product_detail_url',
+        ]
+
+    def get_product_code(self, obj):
+        """product_code를 정수형으로 반환"""
+        try:
+            return int(obj.danawa_product_id)
+        except (ValueError, TypeError):
+            return obj.danawa_product_id
+
+    def get_specs(self, obj):
+        """specs를 간결한 key-value 형식으로 반환 (문자열 값만 포함)"""
+        detail_spec = obj.detail_spec
+        if not detail_spec:
+            return {}
+
+        # detail_spec이 'spec' 키를 가지고 있는 경우 그 내용을 사용
+        spec_data = detail_spec.get('spec', detail_spec)
+
+        # boolean이 아닌 문자열 값만 필터링하여 반환
+        result = {}
+        for key, value in spec_data.items():
+            if isinstance(value, str) and value:
+                result[key] = value
+
+        return result
+
+    def get_category(self, obj):
+        """카테고리 이름 반환"""
+        return obj.category.name if obj.category else None
+
+    def get_thumbnail_url(self, obj):
+        """첫 번째 판매처의 대표 이미지 URL 반환"""
+        mall_info = obj.mall_information.filter(deleted_at__isnull=True).first()
+        return mall_info.representative_image_url if mall_info else None
+
+    def get_product_image_url_list(self, obj):
+        """모든 판매처의 추가 이미지 URL 목록 반환"""
+        mall_infos = obj.mall_information.filter(deleted_at__isnull=True)
+        image_list = []
+        for mall_info in mall_infos:
+            if mall_info.representative_image_url:
+                image_list.append(mall_info.representative_image_url)
+            if mall_info.additional_image_urls:
+                image_list.extend(mall_info.additional_image_urls)
+        return image_list
+
+    def get_product_detail_url(self, obj):
+        """첫 번째 판매처의 상품 페이지 URL 반환"""
+        mall_info = obj.mall_information.filter(deleted_at__isnull=True).first()
+        return mall_info.product_page_url if mall_info else None
+
+
 class ProductListSerializer(serializers.ModelSerializer):
     """Simplified serializer for product list."""
 
@@ -61,7 +137,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             'id',
             'danawa_product_id',
             'name',
-            'lowest_price', 
+            'lowest_price',
             'brand',
             'product_status',
             'category',
@@ -111,12 +187,12 @@ class MallInformationCreateSerializer(serializers.Serializer):
 
 #과거 가격 시리얼 라이저(일 단위)
 class PriceHistorySerializer(serializers.ModelSerializer):
-    data =serializers.DateTimeField(source='recorded_at', format='%Y-%m-%d')
-    price =serializers.IntegerField(source='lowest_price')
+    date = serializers.DateTimeField(source='recorded_at', format='%Y-%m-%d')
+    price = serializers.IntegerField(source='lowest_price')
 
     class Meta:
-        model=PriceHistoryModel
-        fields=['data','price']
+        model = PriceHistoryModel
+        fields = ['date', 'price']
 
 
 #가격 추이 시리얼 라이저(기간)       

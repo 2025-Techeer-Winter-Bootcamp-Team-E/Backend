@@ -2,10 +2,10 @@
 Search business logic services.
 """
 import logging
-from datetime import datetime
 from typing import List, Optional
 
 from django.db.models import Count
+from django.utils import timezone
 
 from .models import SearchModel, RecentViewProductModel
 
@@ -70,7 +70,7 @@ class SearchService:
             user_id=user_id,
             query=query,
             search_mode=search_mode,
-            searched_at=datetime.now(),
+            searched_at=timezone.now(),
             danawa_product_id=danawa_product_id,
         )
 

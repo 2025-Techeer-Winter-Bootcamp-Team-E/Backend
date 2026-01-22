@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from .services import ProductService, MallInformationService
 from .serializers import (
     ProductSerializer,
+    ProductDetailSerializer,
     ProductListSerializer,
     ProductCreateSerializer,
     ProductUpdateSerializer,
@@ -195,16 +196,22 @@ class ProductDetailView(APIView):
         return [IsAdminUser()]
 
     @extend_schema(
-        responses={200: ProductSerializer},
+        responses={200: ProductDetailSerializer},
         summary="Get product detail",
     )
     def get(self, request, product_code: str):
         product = product_service.get_product_by_code(product_code)
         if not product:
-            return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                'status': 404,
+                'message': '상품을 찾을 수 없습니다.'
+            }, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ProductSerializer(product)
-        return Response(serializer.data)
+        serializer = ProductDetailSerializer(product)
+        return Response({
+            'status': 200,
+            'data': serializer.data
+        })
 
     @extend_schema(
         request=ProductUpdateSerializer,
@@ -247,7 +254,10 @@ class ProductMallInfoView(APIView):
     def get(self, request, product_code: str):
         mall_info = mall_info_service.get_mall_info_by_code(product_code)
         serializer = MallInformationSerializer(mall_info, many=True)
-        return Response(serializer.data)
+        return Response({
+            'status': 200,
+            'data': serializer.data
+        })
 
     @extend_schema(
         request=MallInformationCreateSerializer,
@@ -381,12 +391,21 @@ class ProductAIReviewSummaryView(APIView):
             # 1. AI 리뷰 분석 결과 조회
             ai_review = product_service.get_ai_review_summary(product_code)
 
-            # 2. 분석 결과가 없는 경우 404
+            # 2. 분석 결과가 없는 경우 빈 데이터 반환
             if not ai_review:
                 return Response({
-                    "status": 404,
-                    "message": "해당 상품의 AI 분석 결과가 존재하지 않습니다."
-                }, status=status.HTTP_404_NOT_FOUND)
+                    "status": "success",
+                    "data": {
+                        "product_code": product_code,
+                        "total_review_count": 0,
+                        "ai_summary": None,
+                        "pros": [],
+                        "cons": [],
+                        "recommendation_score": None,
+                        "score_reason": None,
+                        "last_updated": None
+                    }
+                }, status=status.HTTP_200_OK)
 
             # 3. 시리얼라이징 및 응답
             serializer = ProductAIReviewSummarySerializer(ai_review)

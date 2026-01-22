@@ -181,14 +181,17 @@ class ShoppingResearchQuestionsRequestSerializer(serializers.Serializer):
     )
 
 
+class OptionItemSerializer(serializers.Serializer):
+    """옵션 항목 시리얼라이저"""
+    id = serializers.IntegerField(help_text='옵션 고유 ID')
+    label = serializers.CharField(help_text='옵션 레이블')
+
+
 class QuestionOptionSerializer(serializers.Serializer):
     """질문 옵션 시리얼라이저"""
     question_id = serializers.IntegerField(help_text='질문 고유 ID')
     question = serializers.CharField(help_text='질문 내용')
-    options = serializers.ListField(
-        child=serializers.CharField(),
-        help_text='선택 가능한 옵션 목록'
-    )
+    options = OptionItemSerializer(many=True, help_text='선택 가능한 옵션 목록')
 
 
 class ShoppingResearchQuestionsDataSerializer(serializers.Serializer):
@@ -208,7 +211,7 @@ class ShoppingResearchQuestionsResponseSerializer(serializers.Serializer):
 class SurveyContentSerializer(serializers.Serializer):
     """설문 응답 항목 시리얼라이저"""
     question_id = serializers.IntegerField(help_text='질문 ID')
-    question = serializers.CharField(help_text='질문 내용')
+    question = serializers.CharField(required=False, allow_blank=True, default='', help_text='질문 내용 (선택)')
     answer = serializers.CharField(help_text='사용자 답변')
 
 

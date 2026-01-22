@@ -100,10 +100,16 @@ class ShoppingResearchService:
 
             questions = result.get('questions', [])
 
-            # Ensure question_id is present
+            # Ensure question_id is present and convert options to object format
             for i, q in enumerate(questions, 1):
                 if 'question_id' not in q:
                     q['question_id'] = i
+                # Convert string options to object format {id, label}
+                if 'options' in q and q['options']:
+                    q['options'] = [
+                        {"id": idx, "label": opt} if isinstance(opt, str) else opt
+                        for idx, opt in enumerate(q['options'], 1)
+                    ]
 
             return {
                 "search_id": search_id,
@@ -123,22 +129,41 @@ class ShoppingResearchService:
             {
                 "question_id": 1,
                 "question": "주요 사용 목적은 무엇인가요?",
-                "options": ["일반 업무", "영상 편집", "게임", "개발"]
+                "options": [
+                    {"id": 1, "label": "일반 업무"},
+                    {"id": 2, "label": "영상 편집"},
+                    {"id": 3, "label": "게임"},
+                    {"id": 4, "label": "개발"}
+                ]
             },
             {
                 "question_id": 2,
                 "question": "생각하시는 예산 범위는?",
-                "options": ["100만원 미만", "100~150만원", "150~200만원", "200만원 이상"]
+                "options": [
+                    {"id": 1, "label": "100만원 미만"},
+                    {"id": 2, "label": "100~150만원"},
+                    {"id": 3, "label": "150~200만원"},
+                    {"id": 4, "label": "200만원 이상"}
+                ]
             },
             {
                 "question_id": 3,
                 "question": "디스플레이에서 가장 중요한 점은?",
-                "options": ["해상도", "색재현율", "크기", "주사율"]
+                "options": [
+                    {"id": 1, "label": "해상도"},
+                    {"id": 2, "label": "색재현율"},
+                    {"id": 3, "label": "크기"},
+                    {"id": 4, "label": "주사율"}
+                ]
             },
             {
                 "question_id": 4,
                 "question": "휴대성을 어느 정도 고려하시나요?",
-                "options": ["매우 중요", "보통", "성능이 더 중요"]
+                "options": [
+                    {"id": 1, "label": "매우 중요"},
+                    {"id": 2, "label": "보통"},
+                    {"id": 3, "label": "성능이 더 중요"}
+                ]
             }
         ]
 
@@ -163,6 +188,13 @@ class ShoppingResearchService:
         cached_data = self._validate_search_id(search_id)
         if cached_data:
             logger.info(f"Valid search_id: {search_id}")
+
+        # Fill in missing question texts from cached data
+        if cached_data and 'questions' in cached_data:
+            questions_map = {q['question_id']: q['question'] for q in cached_data['questions']}
+            for survey in survey_contents:
+                if not survey.get('question'):
+                    survey['question'] = questions_map.get(survey['question_id'], f"질문 {survey['question_id']}")
 
         # Analyze survey responses
         # intent에는 search_query, keywords, priorities, user_needs, product_category, min_price, max_price가 포함됨
@@ -243,11 +275,14 @@ class ShoppingResearchService:
         survey_contents: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Analyze survey responses to extract search intent."""
-        # Format survey responses
-        survey_text = "\n".join([
-            f"Q{s['question_id']}: {s['question']} -> A: {s['answer']}"
-            for s in survey_contents
-        ])
+        # Format survey responses (handle missing question field)
+        def format_survey_item(s):
+            question_id = s['question_id']
+            question_text = s.get('question') or f'질문 {question_id}'
+            answer = s['answer']
+            return f"Q{question_id}: {question_text} -> A: {answer}"
+
+        survey_text = "\n".join([format_survey_item(s) for s in survey_contents])
 
         prompt = SHOPPING_RESEARCH_ANALYSIS_PROMPT.format(
             user_query=user_query,

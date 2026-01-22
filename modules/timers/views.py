@@ -382,6 +382,100 @@ class TimerListCreateView(APIView):
             )
 
 @extend_schema(tags=['Timers'])
+class TimerByProductView(APIView):
+    """상품 코드로 타이머 조회."""
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary='상품별 타이머 조회',
+        description='상품 코드로 해당 상품의 타이머 정보를 조회합니다. 로그인하지 않은 경우 빈 데이터를 반환합니다.',
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'data': {'type': 'object'}
+                }
+            }
+        },
+    )
+    def get(self, request, product_code: str):
+        """상품 코드로 타이머 조회"""
+        try:
+            from modules.products.models import ProductModel
+            from .models import TimerModel
+
+            # 상품 존재 확인
+            try:
+                product = ProductModel.objects.select_related().prefetch_related('mall_information').get(
+                    danawa_product_id=product_code,
+                    deleted_at__isnull=True
+                )
+            except ProductModel.DoesNotExist:
+                return Response({
+                    'status': 200,
+                    'data': None
+                }, status=status.HTTP_200_OK)
+
+            # 로그인하지 않은 경우 빈 데이터 반환
+            if not request.user.is_authenticated:
+                return Response({
+                    'status': 200,
+                    'data': None
+                }, status=status.HTTP_200_OK)
+
+            # 사용자의 해당 상품 타이머 조회 (가장 최근 것)
+            timer = TimerModel.objects.filter(
+                user_id=request.user.id,
+                danawa_product_id=product_code,
+                deleted_at__isnull=True
+            ).order_by('-created_at').first()
+
+            if not timer:
+                return Response({
+                    'status': 200,
+                    'data': None
+                }, status=status.HTTP_200_OK)
+
+            # 대표 이미지 URL 가져오기
+            thumbnail_url = ''
+            try:
+                mall_info = product.mall_information.filter(deleted_at__isnull=True).first()
+                if mall_info and mall_info.representative_image_url:
+                    thumbnail_url = mall_info.representative_image_url
+            except Exception:
+                pass
+
+            # confidence_score를 퍼센트로 변환
+            confidence_percent = (timer.confidence_score * 100) if timer.confidence_score else 0
+
+            data = {
+                'timer_id': timer.id,
+                'product_code': timer.danawa_product_id,
+                'product_name': product.name,
+                'target_price': timer.target_price,
+                'predicted_price': timer.predicted_price or 0,
+                'confidence_score': round(confidence_percent, 1),
+                'recommendation_score': timer.purchase_suitability_score or 0,
+                'thumbnail_url': thumbnail_url,
+                'reason_message': timer.purchase_guide_message or '',
+                'predicted_at': timer.prediction_date or timer.created_at,
+            }
+
+            return Response({
+                'status': 200,
+                'data': data
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"타이머 조회 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response({
+                'status': 200,
+                'data': None
+            }, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=['Timers'])
 class TimerDetailView(APIView):
     """Timer detail endpoint."""
     permission_classes = [IsAuthenticated]
