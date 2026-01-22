@@ -166,3 +166,54 @@ class CategorySubcategoriesView(APIView):
         subcategories = self.category_service.get_subcategories(category_id)
         serializer = CategorySerializer(subcategories, many=True)
         return Response(serializer.data)
+
+
+class ProductFilterCategoriesView(APIView):
+    """상품 필터링용 카테고리 트리 조회."""
+
+    permission_classes = [AllowAny]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.category_service = CategoryService()
+
+    @extend_schema(
+        tags=['Categories'],
+        summary='상품 필터용 카테고리 목록',
+        description='상품 필터링 UI에서 사용할 대분류/소분류 카테고리 트리를 반환합니다.',
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer', 'example': 200},
+                    'data': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'name': {'type': 'string'},
+                                'children': {
+                                    'type': 'array',
+                                    'items': {
+                                        'type': 'object',
+                                        'properties': {
+                                            'id': {'type': 'integer'},
+                                            'name': {'type': 'string'},
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+    def get(self, request):
+        """상품 필터용 카테고리 트리 반환."""
+        categories = self.category_service.get_product_filter_categories()
+        return Response({
+            'status': 200,
+            'data': categories
+        })

@@ -202,24 +202,28 @@ class ProductService:
                 Q(name__icontains=query) | Q(brand__icontains=query)
             )
 
-        # 2. 대분류 필터 (main_cat) - level=0
+        # 2. 대분류 필터 (main_cat) - level 제한 없이 검색하되, 가장 상위 레벨 우선
+        main_category = None
         if main_cat:
             main_category = CategoryModel.objects.filter(
                 name__icontains=main_cat,
-                level=0,
                 deleted_at__isnull=True
-            ).first()
+            ).order_by('level').first()
             if main_category:
                 category_ids = self._get_descendant_category_ids(main_category.id)
                 queryset = queryset.filter(category_id__in=category_ids)
 
-        # 3. 중분류 필터 (sub_cat) - level=1
+        # 3. 중분류 필터 (sub_cat) - level 제한 없이 검색
         if sub_cat:
-            sub_category = CategoryModel.objects.filter(
+            sub_query = CategoryModel.objects.filter(
                 name__icontains=sub_cat,
-                level=1,
                 deleted_at__isnull=True
-            ).first()
+            )
+            # main_cat이 설정된 경우 main_category의 하위 카테고리에서만 검색
+            if main_cat and main_category:
+                main_descendant_ids = self._get_descendant_category_ids(main_category.id)
+                sub_query = sub_query.filter(id__in=main_descendant_ids)
+            sub_category = sub_query.order_by('level').first()
             if sub_category:
                 category_ids = self._get_descendant_category_ids(sub_category.id)
                 queryset = queryset.filter(category_id__in=category_ids)
