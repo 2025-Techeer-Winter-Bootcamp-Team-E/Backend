@@ -17,11 +17,114 @@ from .serializers import (
     MallInformationSerializer,
     MallInformationCreateSerializer,
     ReviewListResponseSerializer,
+    ProductListItemSerializer,
+    ProductSearchResponseSerializer,
 )
 
 
 product_service = ProductService()
 mall_info_service = MallInformationService()
+
+
+@extend_schema(tags=['Products'])
+class ProductListView(APIView):
+    """
+    카테고리별 상품 목록 조회 및 검색 API.
+
+    GET /api/v1/products/
+    """
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="상품 목록 조회 및 검색",
+        description="대분류, 중분류, 브랜드, 가격 범위 등 다양한 조건으로 상품을 검색합니다.",
+        parameters=[
+            OpenApiParameter(name='q', type=str, required=False, description='검색어 (상품명, 브랜드)'),
+            OpenApiParameter(name='main_cat', type=str, required=False, description='대분류 카테고리 이름'),
+            OpenApiParameter(name='sub_cat', type=str, required=False, description='중분류 카테고리 이름'),
+            OpenApiParameter(name='brand', type=str, required=False, description='제조사/브랜드'),
+            OpenApiParameter(name='min_price', type=int, required=False, description='최소 가격'),
+            OpenApiParameter(name='max_price', type=int, required=False, description='최대 가격'),
+            OpenApiParameter(name='sort', type=str, required=False, description='정렬 (price_low, price_high, popular)'),
+            OpenApiParameter(name='page', type=int, required=False, description='페이지 번호 (기본값: 1)'),
+            OpenApiParameter(name='page_size', type=int, required=False, description='페이지 크기 (기본값: 10)'),
+        ],
+        responses={
+            200: ProductSearchResponseSerializer,
+            404: OpenApiResponse(description='상품이 존재하지 않습니다.'),
+            500: OpenApiResponse(description='서버 내부 오류가 발생했습니다.'),
+        }
+    )
+    def get(self, request):
+        try:
+            # Query Parameters 추출
+            q = request.query_params.get('q')
+            main_cat = request.query_params.get('main_cat')
+            sub_cat = request.query_params.get('sub_cat')
+            brand = request.query_params.get('brand')
+            min_price = request.query_params.get('min_price')
+            max_price = request.query_params.get('max_price')
+            sort = request.query_params.get('sort')
+            page = request.query_params.get('page', 1)
+            page_size = request.query_params.get('page_size', 10)
+
+            # 타입 변환
+            page = int(page)
+            page_size = int(page_size)
+            min_price = int(min_price) if min_price else None
+            max_price = int(max_price) if max_price else None
+
+            # 서비스 호출
+            result = product_service.get_products_with_filters(
+                query=q,
+                main_cat=main_cat,
+                sub_cat=sub_cat,
+                brand=brand,
+                min_price=min_price,
+                max_price=max_price,
+                sort=sort,
+                page=page,
+                page_size=page_size,
+            )
+
+            # 결과가 없는 경우 404
+            if result['total_count'] == 0:
+                return Response({
+                    "status": 404,
+                    "message": "상품이 존재하지 않습니다."
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Serializer를 통한 응답 구성
+            products_data = ProductListItemSerializer(
+                result['products'],
+                many=True
+            ).data
+
+            response_data = {
+                "status": 200,
+                "data": {
+                    "pagination": {
+                        "current_page": result['page'],
+                        "size": result['page_size'],
+                        "count": result['total_count'],
+                        "total_pages": result['total_pages']
+                    },
+                    "products": products_data
+                }
+            }
+
+            return Response(response_data, status=status.HTTP_200_OK)
+
+        except ValueError as e:
+            return Response({
+                "status": 400,
+                "message": "잘못된 파라미터입니다."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                "status": 500,
+                "message": "서버 내부 오류가 발생했습니다."
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @extend_schema(tags=['Products'])

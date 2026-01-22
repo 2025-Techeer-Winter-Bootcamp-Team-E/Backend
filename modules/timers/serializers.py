@@ -51,14 +51,42 @@ class TimerSerializer(serializers.ModelSerializer):
 class TimerCreateSerializer(serializers.Serializer):
     """Serializer for creating timer request."""
 
-    danawa_product_id = serializers.CharField(max_length=15)
+    # NOTE: API 스펙 상 product_code == ProductModel.danawa_product_id
+    product_code = serializers.CharField(max_length=15)
     target_price = serializers.IntegerField(min_value=0)
-    prediction_days = serializers.IntegerField(
-        min_value=1,
-        max_value=30,
-        default=7,
-        help_text='Number of days to predict'
-    )
+
+    def validate_product_code(self, value):
+        """Validate that product exists."""
+        from modules.products.models import ProductModel
+        
+        exists = ProductModel.objects.filter(
+            danawa_product_id=value,
+            deleted_at__isnull=True,
+        ).exists()
+        
+        if not exists:
+            raise serializers.ValidationError("잘못된 상품 번호이거나 필수 값이 누락되었습니다.")
+        
+        return value
+
+
+class TimerUpdateSerializer(serializers.Serializer):
+    """Serializer for updating timer target price."""
+    
+    target_price = serializers.IntegerField(min_value=0, error_messages={
+        'invalid': '유효하지 않은 가격 형식입니다.',
+        'min_value': '유효하지 않은 가격 형식입니다.',
+        'required': '유효하지 않은 가격 형식입니다.',
+        'null': '유효하지 않은 가격 형식입니다.',
+    })
+    
+    def validate_target_price(self, value):
+        """Validate target price format."""
+        if value is None:
+            raise serializers.ValidationError("유효하지 않은 가격 형식입니다.")
+        if value < 0:
+            raise serializers.ValidationError("유효하지 않은 가격 형식입니다.")
+        return value
 
 
 class TimerListSerializer(serializers.ModelSerializer):
@@ -77,6 +105,35 @@ class TimerListSerializer(serializers.ModelSerializer):
             'is_notification_enabled',
             'created_at',
         ]
+
+
+class TimerRetrieveSerializer(serializers.Serializer):
+    """Serializer for timer retrieval response."""
+    
+    product_code = serializers.CharField()
+    product_name = serializers.CharField()
+    target_price = serializers.IntegerField()
+    predicted_price = serializers.IntegerField()
+    confidence_score = serializers.FloatField()
+    recommendation_score = serializers.IntegerField()
+    thumbnail_url = serializers.CharField(allow_blank=True)
+    reason_message = serializers.CharField()
+    predicted_at = serializers.DateTimeField()
+
+
+class TimerListItemSerializer(serializers.Serializer):
+    """Serializer for timer list item response."""
+    
+    timer_id = serializers.IntegerField()
+    product_code = serializers.CharField()
+    product_name = serializers.CharField()
+    target_price = serializers.IntegerField()
+    predicted_price = serializers.IntegerField()
+    confidence_score = serializers.FloatField()
+    recommendation_score = serializers.IntegerField()
+    thumbnail_url = serializers.CharField(allow_blank=True)
+    reason_message = serializers.CharField()
+    predicted_at = serializers.DateTimeField()
 
 
 class PriceHistorySerializer(serializers.ModelSerializer):

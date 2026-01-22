@@ -868,13 +868,27 @@ class DanawaCrawler:
 
                 # 판매처명이 없으면 텍스트에서 추출
                 if not seller_name:
-                    name_selectors = ['.d_mall', '.mall_name', '.seller_name', '.shop_name']
-                    for selector in name_selectors:
-                        name_elem = item.select_one(selector)
-                        if name_elem:
-                            seller_name = name_elem.get_text(strip=True)
-                            if seller_name:
-                                break
+                    # 우선 d_mall 내의 링크 텍스트에서 추출 시도
+                    d_mall_link = item.select_one('.d_mall a.link, .d_mall a.priceCompareBuyLink')
+                    if d_mall_link:
+                        link_text = d_mall_link.get_text(strip=True)
+                        if link_text:
+                            seller_name = link_text
+
+                    # 아직 없으면 다른 선택자들 시도
+                    if not seller_name:
+                        name_selectors = ['.d_mall', '.mall_name', '.seller_name', '.shop_name']
+                        for selector in name_selectors:
+                            name_elem = item.select_one(selector)
+                            if name_elem:
+                                text = name_elem.get_text(strip=True)
+                                # "신고" 버튼 텍스트 제거
+                                if text.endswith('신고'):
+                                    text = text[:-2].strip()
+                                text = re.sub(r'신고$', '', text).strip()
+                                if text:
+                                    seller_name = text
+                                    break
 
                 # 가격 - 여러 선택자 시도
                 price = 0
@@ -998,13 +1012,31 @@ class DanawaCrawler:
 
                     # 판매처명이 없으면 텍스트에서 추출
                     if not seller_name:
-                        name_selectors = ['.d_mall', '.mall_name', '.seller_name', '.shop_name']
-                        for selector in name_selectors:
-                            name_elem = item.select_one(selector)
-                            if name_elem:
-                                seller_name = name_elem.get_text(strip=True)
-                                if seller_name:
-                                    break
+                        # 우선 d_mall 내의 링크 텍스트에서 추출 시도
+                        d_mall_link = item.select_one('.d_mall a.link, .d_mall a.priceCompareBuyLink')
+                        if d_mall_link:
+                            # 링크 내부의 이미지가 아닌 텍스트 노드 확인
+                            link_text = d_mall_link.get_text(strip=True)
+                            if link_text:
+                                seller_name = link_text
+
+                        # 아직 없으면 다른 선택자들 시도
+                        if not seller_name:
+                            name_selectors = ['.d_mall', '.mall_name', '.seller_name', '.shop_name']
+                            for selector in name_selectors:
+                                name_elem = item.select_one(selector)
+                                if name_elem:
+                                    # "신고" 버튼 텍스트 제거
+                                    text = name_elem.get_text(strip=True)
+                                    # "신고"로 끝나면 제거
+                                    if text.endswith('신고'):
+                                        text = text[:-2].strip()
+                                    # "네이버페이" 뒤의 "신고" 패턴 제거
+                                    import re
+                                    text = re.sub(r'신고$', '', text).strip()
+                                    if text:
+                                        seller_name = text
+                                        break
 
                     # 가격 - 여러 선택자 시도
                     price = 0
