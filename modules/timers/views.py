@@ -45,20 +45,20 @@ class TimerListCreateView(APIView):
                 name='user_id',
                 type=int,
                 required=False,
-                description='조회를 원하는 사용자의 고유 ID (있으면 전체 목록 조회)'
+                description='조회를 원하는 사용자의 고유 ID (선택사항: 없으면 단일 조회, 있으면 전체 목록 조회)'
             ),
             OpenApiParameter(
                 name='page',
                 type=int,
                 required=False,
-                description='요청 페이지 번호 (기본값: 1)',
+                description='요청 페이지 번호 (기본값: 1, user_id 있을 때만 사용)',
                 default=1
             ),
             OpenApiParameter(
                 name='size',
                 type=int,
                 required=False,
-                description='페이지 크기 (기본값: 10)',
+                description='페이지 크기 (기본값: 10, user_id 있을 때만 사용)',
                 default=10
             ),
         ],
@@ -111,86 +111,7 @@ class TimerListCreateView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
-    def _get_single_timer(self, request):
-        """단일 타이머 조회 - 현재 가격의 저점/고점 판정 결과 및 정보 조회"""
-        try:
-            # 사용자의 가장 최근 타이머 조회
-            timers = timer_service.get_user_timers(
-                user_id=request.user.id,
-                offset=0,
-                limit=1
-            )
-            
-            if not timers:
-                return Response(
-                    {
-                        'status': 404,
-                        'message': '해당 예측 데이터를 찾을 수 없습니다.'
-                    },
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            
-            timer = timers[0]
-            
-            # 상품 정보 조회
-            from modules.products.models import ProductModel
-            try:
-                product = ProductModel.objects.select_related().prefetch_related('mall_information').get(
-                    danawa_product_id=timer.danawa_product_id,
-                    deleted_at__isnull=True
-                )
-            except ProductModel.DoesNotExist:
-                return Response(
-                    {
-                        'status': 404,
-                        'message': '해당 예측 데이터를 찾을 수 없습니다.'
-                    },
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            
-            # 대표 이미지 URL 가져오기
-            thumbnail_url = ''
-            try:
-                mall_info = product.mall_information.filter(
-                    deleted_at__isnull=True
-                ).first()
-                if mall_info and mall_info.representative_image_url:
-                    thumbnail_url = mall_info.representative_image_url
-            except Exception:
-                pass
-            
-            # confidence_score를 퍼센트로 변환 (0.925 -> 92.5)
-            confidence_percent = (timer.confidence_score * 100) if timer.confidence_score else 0
-            
-            data = {
-                'product_code': timer.danawa_product_id,
-                'product_name': product.name,
-                'target_price': timer.target_price,
-                'predicted_price': timer.predicted_price or 0,
-                'confidence_score': round(confidence_percent, 1),
-                'recommendation_score': timer.purchase_suitability_score or 0,
-                'thumbnail_url': thumbnail_url,
-                'reason_message': timer.purchase_guide_message or '',
-                'predicted_at': timer.prediction_date or timer.created_at,
-            }
-            
-            serializer = TimerRetrieveSerializer(data)
-            return Response(
-                {
-                    'status': 200,
-                    'data': serializer.data
-                },
-                status=status.HTTP_200_OK
-            )
-        except Exception as e:
-            logger.error(f"타이머 조회 중 서버 오류 발생: {str(e)}", exc_info=True)
-            return Response(
-                {
-                    'status': 500,
-                    'message': 'AI 분석 모델 응답 처리 중 오류가 발생했습니다.'
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+    
     
     def _get_timer_list(self, request, user_id_param):
         """전체 타이머 목록 조회 - 사용자가 설정한 타이머 전체 조회"""
@@ -386,7 +307,7 @@ class TimerListCreateView(APIView):
             OpenApiParameter(
                 name='user_id',
                 type=int,
-                required=True,
+                required=False,
                 description='조회를 원하는 사용자의 고유 ID'
             ),
             OpenApiParameter(
