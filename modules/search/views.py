@@ -9,6 +9,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiRespon
 
 from .services import SearchService, RecentViewProductService
 from .llm_service import LLMRecommendationService
+from .shopping_research_service import ShoppingResearchService
 from .serializers import (
     SearchQuerySerializer,
     SearchResultSerializer,
@@ -21,6 +22,10 @@ from .serializers import (
     RecentSearchResponseSerializer,
     LLMRecommendationRequestSerializer,
     LLMRecommendationResponseSerializer,
+    ShoppingResearchQuestionsRequestSerializer,
+    ShoppingResearchQuestionsResponseSerializer,
+    ShoppingResearchRecommendationsRequestSerializer,
+    ShoppingResearchRecommendationsResponseSerializer,
 )
 
 class SearchView(APIView):
@@ -237,5 +242,104 @@ class LLMRecommendationView(APIView):
             return Response({
                 "status": 500,
                 "message": "AI 분석 또는 벡터 검색 과정에서 오류가 발생했습니다.",
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(tags=['Search'])
+class QuestionsView(APIView):
+    """
+    쇼핑 리서치 1단계 API: 맞춤형 질문 생성.
+
+    사용자의 검색 쿼리를 분석하여 최적의 상품 추천을 위한
+    맞춤형 질문 4개를 생성합니다.
+    """
+    permission_classes = [AllowAny]
+    shopping_research_service = ShoppingResearchService()
+
+    @extend_schema(
+        summary='쇼핑 리서치 질문 생성',
+        description='사용자의 검색 쿼리를 분석하여 맞춤형 질문 4개를 생성합니다.',
+        request=ShoppingResearchQuestionsRequestSerializer,
+        responses={
+            200: ShoppingResearchQuestionsResponseSerializer,
+            400: OpenApiResponse(description='유효성 검사 실패'),
+            500: OpenApiResponse(description='서버 내부 오류가 발생했습니다.'),
+        },
+    )
+    def post(self, request):
+        # 1. 요청 검증
+        serializer = ShoppingResearchQuestionsRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_query = serializer.validated_data['user_query']
+
+        try:
+            # 2. 질문 생성
+            result = self.shopping_research_service.generate_questions(user_query)
+
+            # 3. 응답 반환
+            return Response({
+                "status": 200,
+                "message": "질문 생성 성공",
+                "data": result
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                "status": 500,
+                "message": "서버 내부 오류가 발생했습니다.",
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(tags=['Search'])
+class ShoppingResearchView(APIView):
+    """
+    쇼핑 리서치 2단계 API: 상품 분석 및 추천.
+
+    설문 응답을 분석하여 벡터 유사도 90% 이상의
+    최적 상품 5개를 추천합니다.
+    """
+    permission_classes = [AllowAny]
+    shopping_research_service = ShoppingResearchService()
+
+    @extend_schema(
+        summary='쇼핑 리서치 상품 추천',
+        description='설문 응답을 분석하여 최적의 상품 5개를 추천합니다.',
+        request=ShoppingResearchRecommendationsRequestSerializer,
+        responses={
+            200: ShoppingResearchRecommendationsResponseSerializer,
+            400: OpenApiResponse(description='모든 질문에 대한 답변이 필요합니다.'),
+            500: OpenApiResponse(description='서버 내부 오류가 발생했습니다.'),
+        },
+    )
+    def post(self, request):
+        # 1. 요청 검증
+        serializer = ShoppingResearchRecommendationsRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        search_id = serializer.validated_data['search_id']
+        user_query = serializer.validated_data['user_query']
+        survey_contents = serializer.validated_data['survey_contents']
+
+        try:
+            # 2. 상품 추천
+            result = self.shopping_research_service.get_recommendations(
+                search_id=search_id,
+                user_query=user_query,
+                survey_contents=survey_contents
+            )
+
+            # 3. 응답 반환
+            return Response({
+                "status": 200,
+                "message": "쇼핑 리서치 결과 분석 성공 (상위 5개 상품)",
+                "data": result
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                "status": 500,
+                "message": "서버 내부 오류가 발생했습니다.",
                 "error": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
