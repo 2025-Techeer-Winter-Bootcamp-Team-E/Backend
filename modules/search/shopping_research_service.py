@@ -13,14 +13,18 @@ from typing import List, Dict, Any, Optional
 from django.core.cache import cache
 from django.db.models import F
 from django.contrib.postgres.search import TrigramSimilarity
+from django.db.models.functions import Cast
+from django.db.models import TextField
 from pgvector.django import CosineDistance
 
 from modules.products.models import ProductModel, MallInformationModel
+from modules.categories.models import CategoryModel
 from shared.ai_clients import get_openai_client, get_gemini_client
 from .prompts import (
     QUESTION_GENERATION_PROMPT,
     SHOPPING_RESEARCH_ANALYSIS_PROMPT,
     AI_REVIEW_SUMMARY_PROMPT,
+    BATCH_PRODUCT_ANALYSIS_PROMPT,
     RECOMMENDATION_REASON_PROMPT,
 )
 
@@ -33,9 +37,8 @@ class ShoppingResearchService:
     CACHE_TTL = 1800  # 30 minutes
     TOP_K = 5
     SEARCH_LIMIT = 50
-    VECTOR_WEIGHT = 0.7
-    KEYWORD_WEIGHT = 0.3
-    MIN_SIMILARITY = 0.90  # 90% similarity threshold
+    VECTOR_WEIGHT = 1.0  # Only vector score now
+    MIN_SIMILARITY = 0.60  # 60% similarity threshold
 
     def __init__(self):
         self.openai_client = get_openai_client()
@@ -162,12 +165,38 @@ class ShoppingResearchService:
             logger.info(f"Valid search_id: {search_id}")
 
         # Analyze survey responses
+        # intent에는 search_query, keywords, priorities, user_needs, product_category, min_price, max_price가 포함됨
         intent = self._analyze_survey(user_query, survey_contents)
 
+        logger.debug(f"Analyzed intent: {intent}")
+        # 카테고리 ID 조회 (필터링용)
+        category_id = None
+        llm_category_name = intent.get('product_category')
+        if llm_category_name:
+            # TrigramSimilarity를 사용하여 DB에서 가장 유사한 카테고리 검색
+            best_match = CategoryModel.objects.annotate(
+                similarity=TrigramSimilarity('name', llm_category_name)
+            ).filter(similarity__gt=0.3).order_by('-similarity').first()
+
+            if best_match:
+                category_id = best_match.id
+                logger.info(f"LLM category '{llm_category_name}' mapped to DB category '{best_match.name}' (ID: {category_id})")
+            else:
+                logger.warning(f"LLM category '{llm_category_name}' could not be mapped to any DB category with similarity > 0.3. Category filter will not be applied.")
+
+        min_price = intent.get('min_price')
+        max_price = intent.get('max_price')
+
         # Perform hybrid search
-        vector_results = self._vector_search(intent['search_query'])
-        keyword_results = self._keyword_search(intent['keywords'])
-        fused_results = self._fuse_results(vector_results, keyword_results)
+        # Price range validation
+        if min_price is not None and max_price is not None and min_price > max_price:
+            logger.warning(f"Invalid price range from LLM: min_price({min_price}) > max_price({max_price}). Ignoring price filter.")
+            min_price, max_price = None, None
+
+        # Perform hybrid search with strict filters
+        logger.info(f"Attempting search with strict filters: category_id={category_id}, price=[{min_price}-{max_price}]")
+        vector_results = self._vector_search(intent['search_query'], category_id, min_price, max_price) # Only vector search
+        fused_results = self._fuse_results(vector_results) # Pass only vector results
 
         # Filter by minimum similarity (90%+)
         high_similarity_results = [
@@ -176,21 +205,30 @@ class ShoppingResearchService:
 
         # If not enough high-similarity results, use top results
         if len(high_similarity_results) < self.TOP_K:
-            logger.info(f"Only {len(high_similarity_results)} products with 90%+ similarity. Using top results.")
+            logger.info(f"Only {len(high_similarity_results)} products with {self.MIN_SIMILARITY*100}%+ similarity. Using top results.")
             high_similarity_results = fused_results[:self.TOP_K]
 
         # Get top K products
         top_products = high_similarity_results[:self.TOP_K]
 
+        # Batch generate reasons and summaries (API 호출 최적화: 1회 호출)
+        batch_analysis = self._batch_analyze_products(
+            user_query=user_query,
+            user_needs=intent['user_needs'],
+            products=top_products
+        )
+
         # Build product recommendations
         products = []
         for rank, product_data in enumerate(top_products, 1):
+            p_code = str(product_data['product'].danawa_product_id)
             product_info = self._analyze_product(
                 product_data=product_data,
                 user_query=user_query,
                 user_needs=intent['user_needs'],
                 rank=rank,
-                all_prices=[p['product'].lowest_price for p in top_products]
+                all_prices=[p['product'].lowest_price for p in top_products],
+                pre_analysis=batch_analysis.get(p_code)
             )
             products.append(product_info)
 
@@ -225,10 +263,16 @@ class ShoppingResearchService:
             else:
                 intent = json.loads(response)
 
+            min_price = intent.get('min_price')
+            max_price = intent.get('max_price')
+
             return {
+                'product_category': intent.get('product_category'),
                 'search_query': intent.get('search_query', user_query),
                 'keywords': intent.get('keywords', [user_query]),
                 'priorities': intent.get('priorities', {}),
+                'min_price': min_price if min_price is not None else None,
+                'max_price': max_price if max_price is not None and max_price > 0 else None,
                 'user_needs': intent.get('user_needs', user_query)
             }
 
@@ -238,20 +282,50 @@ class ShoppingResearchService:
             answers = [s['answer'] for s in survey_contents]
             combined_query = f"{user_query} {' '.join(answers)}"
             return {
+                'product_category': None,
                 'search_query': combined_query,
                 'keywords': [user_query] + answers,
                 'priorities': {},
+                'min_price': None,
+                'max_price': None,
                 'user_needs': user_query
             }
 
-    def _vector_search(self, search_query: str) -> List[Dict[str, Any]]:
+    def _get_descendant_category_ids(self, category_id: int) -> List[int]:
+        """Recursively get all descendant category IDs."""
+        ids = [category_id]
+        children = CategoryModel.objects.filter(parent_id=category_id, deleted_at__isnull=True)
+        for child in children:
+            ids.extend(self._get_descendant_category_ids(child.id))
+        return ids
+
+    def _vector_search(
+        self,
+        search_query: str,
+        category_id: Optional[int] = None,
+        min_price: Optional[int] = None,
+        max_price: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """Perform HNSW vector search."""
         query_embedding = self.openai_client.create_embedding(search_query)
 
-        products = ProductModel.objects.filter(
+        queryset = ProductModel.objects.filter(
             deleted_at__isnull=True,
             detail_spec_vector__isnull=False
-        ).exclude(
+        )
+
+        # Apply hard filters
+        if category_id:
+            category_ids = self._get_descendant_category_ids(category_id)
+            queryset = queryset.filter(category_id__in=category_ids)
+        if min_price is not None:
+            queryset = queryset.filter(lowest_price__gte=min_price)
+        if max_price is not None:
+            queryset = queryset.filter(lowest_price__lte=max_price)
+
+        logger.debug(f"Vector search - after hard filters (category={category_id}, min_price={min_price}, max_price={max_price}): {queryset.count()} products remaining.")
+        logger.debug(f"Vector search - after hard filters (category={category_id}, min_price={min_price}, max_price={max_price}): {queryset.count()} products remaining for query '{search_query}'.")
+        products = queryset.exclude(
             product_status__in=['단종', '판매중지', '품절']
         ).annotate(
             distance=CosineDistance('detail_spec_vector', query_embedding)
@@ -270,43 +344,6 @@ class ShoppingResearchService:
                 'product': product,
                 'mall_info': mall_info,
                 'vector_score': similarity,
-                'keyword_score': 0.0
-            })
-
-        return results
-
-    def _keyword_search(self, keywords: List[str]) -> List[Dict[str, Any]]:
-        """Perform GIN trigram keyword search."""
-        if not keywords:
-            return []
-
-        search_text = ' '.join(keywords)
-
-        products = ProductModel.objects.filter(
-            deleted_at__isnull=True
-        ).exclude(
-            product_status__in=['단종', '판매중지', '품절']
-        ).annotate(
-            name_similarity=TrigramSimilarity('name', search_text),
-            brand_similarity=TrigramSimilarity('brand', search_text)
-        ).annotate(
-            total_similarity=F('name_similarity') * 0.7 + F('brand_similarity') * 0.3
-        ).filter(
-            total_similarity__gt=0.05
-        ).order_by('-total_similarity')[:self.SEARCH_LIMIT]
-
-        results = []
-        for product in products:
-            mall_info = MallInformationModel.objects.filter(
-                product=product,
-                deleted_at__isnull=True
-            ).first()
-
-            results.append({
-                'product': product,
-                'mall_info': mall_info,
-                'vector_score': 0.0,
-                'keyword_score': float(product.total_similarity)
             })
 
         return results
@@ -314,7 +351,6 @@ class ShoppingResearchService:
     def _fuse_results(
         self,
         vector_results: List[Dict[str, Any]],
-        keyword_results: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Fuse vector and keyword search results with hybrid scoring."""
         results_map: Dict[str, Dict[str, Any]] = {}
@@ -325,27 +361,11 @@ class ShoppingResearchService:
                 'product': item['product'],
                 'mall_info': item['mall_info'],
                 'vector_score': item['vector_score'],
-                'keyword_score': 0.0
             }
-
-        for item in keyword_results:
-            product_id = item['product'].danawa_product_id
-            if product_id in results_map:
-                results_map[product_id]['keyword_score'] = item['keyword_score']
-            else:
-                results_map[product_id] = {
-                    'product': item['product'],
-                    'mall_info': item['mall_info'],
-                    'vector_score': 0.0,
-                    'keyword_score': item['keyword_score']
-                }
 
         fused_results = []
         for product_id, data in results_map.items():
-            combined_score = (
-                self.VECTOR_WEIGHT * data['vector_score'] +
-                self.KEYWORD_WEIGHT * data['keyword_score']
-            )
+            combined_score = self.VECTOR_WEIGHT * data['vector_score']
             fused_results.append({
                 **data,
                 'combined_score': combined_score
@@ -359,13 +379,66 @@ class ShoppingResearchService:
 
         return fused_results
 
+    def _batch_analyze_products(
+        self,
+        user_query: str,
+        user_needs: str,
+        products: List[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, str]]:
+        """
+        Batch generate recommendation reasons and review summaries for multiple products.
+        Returns a dict keyed by product_code containing 'recommendation_reason' and 'ai_review_summary'.
+        """
+        if not products:
+            return {}
+
+        products_info_lines = []
+        for p_data in products:
+            product = p_data['product']
+            specs = self._extract_product_specs(product.detail_spec)
+
+            # Format specs for prompt
+            spec_items = []
+            for key, value in specs.items():
+                if value:
+                    spec_items.append(f"{key}: {value}")
+            specs_str = ', '.join(spec_items) if spec_items else '정보 없음'
+
+            products_info_lines.append(
+                f"- 상품코드: {product.danawa_product_id}\n"
+                f"  상품명: {product.name}\n"
+                f"  브랜드: {product.brand}\n"
+                f"  가격: {product.lowest_price:,}원\n"
+                f"  스펙: {specs_str}"
+            )
+
+        products_info = "\n\n".join(products_info_lines)
+
+        prompt = BATCH_PRODUCT_ANALYSIS_PROMPT.format(
+            user_query=user_query,
+            user_needs=user_needs,
+            products_info=products_info
+        )
+
+        try:
+            response = self.gemini_client.generate_content(prompt)
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            result = json.loads(json_match.group()) if json_match else json.loads(response)
+            analysis_map = {str(item.get('product_code')): item for item in result.get('results', [])}
+            return analysis_map
+
+        except Exception as e:
+            logger.warning(f"Batch analysis failed: {e}. Falling back to individual generation.")
+            return {}
+
     def _analyze_product(
         self,
         product_data: Dict[str, Any],
         user_query: str,
         user_needs: str,
         rank: int,
-        all_prices: List[int]
+        all_prices: List[int],
+        pre_analysis: Dict[str, str] = None
     ) -> Dict[str, Any]:
         """Analyze a single product and build recommendation response."""
         product = product_data['product']
@@ -375,24 +448,26 @@ class ShoppingResearchService:
         # Extract specs
         specs = self._extract_product_specs(product.detail_spec)
 
-        # Generate recommendation reason
-        recommendation_reason = self._generate_recommendation_reason(
-            user_query=user_query,
-            user_needs=user_needs,
-            product_name=product.name,
-            brand=product.brand,
-            price=product.lowest_price,
-            specs=specs
-        )
-
-        # Generate AI review summary
-        ai_review_summary = self._generate_ai_review_summary(
-            product_name=product.name,
-            brand=product.brand,
-            price=product.lowest_price,
-            specs=specs,
-            user_needs=user_needs
-        )
+        # Use pre-generated analysis if available, otherwise generate individually
+        if pre_analysis:
+            recommendation_reason = pre_analysis.get('recommendation_reason', '추천 사유를 생성하지 못했습니다.')
+            ai_review_summary = pre_analysis.get('ai_review_summary', '리뷰 요약을 생성하지 못했습니다.')
+        else:
+            recommendation_reason = self._generate_recommendation_reason(
+                user_query=user_query,
+                user_needs=user_needs,
+                product_name=product.name,
+                brand=product.brand,
+                price=product.lowest_price,
+                specs=specs
+            )
+            ai_review_summary = self._generate_ai_review_summary(
+                product_name=product.name,
+                brand=product.brand,
+                price=product.lowest_price,
+                specs=specs,
+                user_needs=user_needs
+            )
 
         # Calculate performance score (0.0 - 1.0)
         performance_score = self._calculate_performance_score(product, combined_score)
