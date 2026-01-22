@@ -442,6 +442,14 @@ class CartPaymentView(APIView):
                 },
                 status=status.HTTP_201_CREATED
             )
+        except InsufficientTokenBalanceError as e:
+            return Response(
+                {
+                    'status': 402,
+                    'message': '토큰 잔액이 부족합니다.',
+                },
+                status=402  # Payment Required
+            )
         except OrderNotFoundError as e:
             return Response(
                 {
