@@ -155,7 +155,140 @@ class ProductService:
         product.deleted_at = datetime.now()
         product.save()
         return True
-    
+
+    def get_products_with_filters(
+        self,
+        query: str = None,
+        main_cat: str = None,
+        sub_cat: str = None,
+        brand: str = None,
+        min_price: int = None,
+        max_price: int = None,
+        sort: str = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> dict:
+        """
+        다중 조건 필터링 및 검색 기능이 포함된 상품 목록 조회.
+
+        Args:
+            query: 검색어 (상품명, 브랜드)
+            main_cat: 대분류 카테고리 이름
+            sub_cat: 중분류 카테고리 이름
+            brand: 브랜드/제조사
+            min_price: 최소 가격
+            max_price: 최대 가격
+            sort: 정렬 (price_low, price_high, popular)
+            page: 페이지 번호
+            page_size: 페이지 크기
+
+        Returns:
+            dict: {
+                'products': List[ProductModel],
+                'total_count': int,
+                'page': int,
+                'page_size': int,
+                'total_pages': int
+            }
+        """
+        from modules.categories.models import CategoryModel
+        from django.db.models import Prefetch
+
+        queryset = ProductModel.objects.filter(deleted_at__isnull=True)
+
+        # 1. 검색어 필터 (q)
+        if query:
+            queryset = queryset.filter(
+                Q(name__icontains=query) | Q(brand__icontains=query)
+            )
+
+        # 2. 대분류 필터 (main_cat) - level=0
+        if main_cat:
+            main_category = CategoryModel.objects.filter(
+                name__icontains=main_cat,
+                level=0,
+                deleted_at__isnull=True
+            ).first()
+            if main_category:
+                category_ids = self._get_descendant_category_ids(main_category.id)
+                queryset = queryset.filter(category_id__in=category_ids)
+
+        # 3. 중분류 필터 (sub_cat) - level=1
+        if sub_cat:
+            sub_category = CategoryModel.objects.filter(
+                name__icontains=sub_cat,
+                level=1,
+                deleted_at__isnull=True
+            ).first()
+            if sub_category:
+                category_ids = self._get_descendant_category_ids(sub_category.id)
+                queryset = queryset.filter(category_id__in=category_ids)
+
+        # 4. 브랜드 필터 (brand)
+        if brand:
+            queryset = queryset.filter(brand__icontains=brand)
+
+        # 5. 가격 범위 필터 (min_price, max_price)
+        if min_price is not None:
+            queryset = queryset.filter(lowest_price__gte=min_price)
+        if max_price is not None:
+            queryset = queryset.filter(lowest_price__lte=max_price)
+
+        # 6. 정렬 (sort)
+        if sort == 'price_low':
+            queryset = queryset.order_by('lowest_price')
+        elif sort == 'price_high':
+            queryset = queryset.order_by('-lowest_price')
+        elif sort == 'popular':
+            queryset = queryset.order_by('-review_count', '-review_rating')
+        else:
+            queryset = queryset.order_by('-created_at')
+
+        # 7. 전체 개수 계산
+        total_count = queryset.count()
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 0
+
+        # 8. N+1 쿼리 방지를 위한 prefetch
+        queryset = queryset.select_related('category').prefetch_related(
+            Prefetch(
+                'mall_information',
+                queryset=MallInformationModel.objects.filter(deleted_at__isnull=True)
+            )
+        )
+
+        # 9. 페이지네이션 적용
+        offset = (page - 1) * page_size
+        products = list(queryset[offset:offset + page_size])
+
+        return {
+            'products': products,
+            'total_count': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages
+        }
+
+    def _get_descendant_category_ids(self, category_id: int) -> list:
+        """
+        특정 카테고리의 모든 하위 카테고리 ID를 재귀적으로 수집.
+
+        Args:
+            category_id: 시작 카테고리 ID
+
+        Returns:
+            list: 해당 카테고리 및 모든 하위 카테고리 ID 목록
+        """
+        from modules.categories.models import CategoryModel
+
+        ids = [category_id]
+        children = CategoryModel.objects.filter(
+            parent_id=category_id,
+            deleted_at__isnull=True
+        )
+        for child in children:
+            ids.extend(self._get_descendant_category_ids(child.id))
+        return ids
+
     def get_price_trend_data(self, product: ProductModel, months: int = 6): #views.py에서 탐색 기간 설정 조작가능
         start_date = timezone.now() - relativedelta(months=months)
 
