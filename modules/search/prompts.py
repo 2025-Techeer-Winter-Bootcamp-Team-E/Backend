@@ -1,7 +1,7 @@
 """
 LLM prompt templates for product recommendation search.
 """
-
+from modules.categories.models import CategoryModel # CategoryModel import
 # 의도 추출용 프롬프트 - JSON 출력
 INTENT_EXTRACTION_PROMPT = """당신은 컴퓨터/전자제품 쇼핑 전문가입니다. 사용자의 자연어 쿼리를 분석하여 검색 의도를 추출해주세요.
 
@@ -23,7 +23,7 @@ INTENT_EXTRACTION_PROMPT = """당신은 컴퓨터/전자제품 쇼핑 전문가�
 }}
 
 필드 설명:
-- product_category: 사용자가 찾는 상품 카테고리 (노트북, 모니터, CPU, 그래픽카드, SSD, RAM, 기타 중 하나)
+- product_category: 사용자가 찾는 상품 카테고리 (노트북, 모니터, CPU, 그래픽카드, SSD, RAM, 기타 중 하나). 만약 쿼리에서 명확한 카테고리를 알 수 없다면 '기타'로 설정하세요.
 - keywords: 검색에 사용할 핵심 키워드 (브랜드, 스펙, 용도 등). 반드시 상품 카테고리를 포함해야 함
 - priorities: 각 속성의 중요도 (0: 관심없음, 10: 매우 중요)
   - portability: 휴대성 (무게, 크기)
@@ -31,7 +31,7 @@ INTENT_EXTRACTION_PROMPT = """당신은 컴퓨터/전자제품 쇼핑 전문가�
   - price: 가격 민감도
   - display: 화면 품질
   - battery: 배터리 수명
-- search_query: 벡터 검색에 사용할 쿼리. 상품 카테고리와 핵심 스펙을 조합 (예: "경량 고성능 노트북 개발용")
+- search_query: 벡터 검색에 사용할 쿼리. 상품 카테고리와 핵심 스펙(CPU, RAM, GPU, 해상도, 주사율, 무게 등), 용도를 조합한 10단어 이내의 간결하고 구체적인 문장. 예: "고사양 게이밍 노트북 RTX 4070 32GB RAM QHD 144Hz", "전문가용 4K 고해상도 모니터 Adobe RGB 99%", "경량 휴대용 노트북 인텔 i7 16GB RAM 1.2kg"
 - user_needs: 사용자의 핵심 니즈 요약
 
 JSON만 출력하세요. 다른 텍스트는 포함하지 마세요."""
@@ -123,7 +123,7 @@ JSON만 출력하세요."""
 
 
 # 쇼핑 리서치 질문 생성 프롬프트
-QUESTION_GENERATION_PROMPT = """당신은 컴퓨터/전자제품 쇼핑 전문 컨설턴트입니다. 사용자의 검색 쿼리를 분석하여 최적의 상품을 추천하기 위한 맞춤형 질문 4개를 생성해주세요.
+QUESTION_GENERATION_PROMPT = """당신은 컴퓨터/전자제품 쇼핑 전문 컨설턴트입니다. 사용자의 검색 쿼리를 분석하여 최적의 상품을 추천하기 위한 맞춤형 질문 4개를 생성해주세요. 질문은 사용자의 구체적인 니즈와 상품의 상세 스펙을 파악하는 데 도움이 되도록 명확하고 구체적이어야 합니다.
 
 사용자 검색 쿼리: "{user_query}"
 
@@ -176,6 +176,7 @@ SHOPPING_RESEARCH_ANALYSIS_PROMPT = """당신은 컴퓨터/전자제품 전문�
 
 다음 JSON 형식으로 응답해주세요:
 {{
+    "product_category": "사용자가 찾는 상품의 카테고리 (예: 노트북, 모니터, 그래픽카드)",
     "search_query": "벡터 검색용 최적화된 검색 쿼리",
     "keywords": ["핵심", "키워드", "목록"],
     "priorities": {{
@@ -185,8 +186,15 @@ SHOPPING_RESEARCH_ANALYSIS_PROMPT = """당신은 컴퓨터/전자제품 전문�
         "display": 0-10,
         "battery": 0-10
     }},
+    "min_price": 0,
+    "max_price": 0,
     "user_needs": "사용자 니즈 한 문장 요약"
 }}
+
+필드 설명:
+- product_category: 사용자가 **명확하게** 찾는 상품의 **최상위** 카테고리 (예: 노트북, 모니터, **그래픽카드**). 쿼리/응답에 카테고리가 명확하지 않은 경우, '기타'로 설정
+- min_price: 사용자가 응답한 예산의 최소 가격 (숫자만, 없으면 null). '100만원 미만'은 min_price: 0, max_price: 1000000. '200만원 이상'은 min_price: 2000000, max_price: null.
+- max_price: 사용자가 응답한 예산의 최대 가격 (숫자만, 없으면 null).
 
 JSON만 출력하세요."""
 
@@ -204,3 +212,29 @@ AI_REVIEW_SUMMARY_PROMPT = """당신은 제품 리뷰 분석 전문가입니다.
 이 상품에 대한 간결한(1-2문장) AI 리뷰 요약을 작성하세요. 사용자의 니즈 관점에서 핵심 장점이나 특징을 언급하세요.
 
 리뷰 요약만 출력하세요."""
+
+
+# 일괄 상품 분석 프롬프트 (추천 사유 + 리뷰 요약)
+BATCH_PRODUCT_ANALYSIS_PROMPT = """당신은 컴퓨터/전자제품 쇼핑 전문가입니다. 사용자의 질문과 니즈를 바탕으로, 추천된 상품들에 대한 추천 사유와 리뷰 요약을 작성해주세요.
+
+[사용자 질문]
+"{user_query}"
+
+[핵심 니즈]
+{user_needs}
+
+[추천 상품 목록]
+{products_info}
+
+다음 JSON 형식으로 응답해주세요:
+{{
+    "results": [
+        {{
+            "product_code": "상품코드",
+            "recommendation_reason": "추천 사유 (사용자 상황과 스펙을 연결하여 2-3문장으로 구체적으로 작성)",
+            "ai_review_summary": "AI 리뷰 요약 (사용자 니즈 관점에서 핵심 장점 1-2문장)"
+        }}
+    ]
+}}
+
+JSON만 출력하세요."""
