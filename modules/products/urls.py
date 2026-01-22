@@ -5,6 +5,8 @@ from .views import (
     ProductDetailView,
     ProductMallInfoView,
     ProductReviewListView,
+    ProductAIReviewSummaryView,
+    ProductAIReviewGenerateView,
 )
 
 urlpatterns = [
@@ -14,6 +16,9 @@ urlpatterns = [
     path('products/<str:product_code>/price-trend/', ProductPriceTrendView.as_view(), name='product-price-trend'),
     path('products/<str:product_code>/', ProductDetailView.as_view(), name='product_detail'),
     path('products/<str:product_code>/prices/', ProductMallInfoView.as_view(), name='product-mall_info'),
+    # AI 리뷰 요약 (reviews/ 보다 먼저 배치)
+    path('products/<str:product_code>/reviews/summary/generate/', ProductAIReviewGenerateView.as_view(), name='product-ai-review-generate'),
+    path('products/<str:product_code>/reviews/summary/', ProductAIReviewSummaryView.as_view(), name='product-ai-review-summary'),
     path('products/<str:product_code>/reviews/', ProductReviewListView.as_view(), name='product-review-list'),
 ]
 

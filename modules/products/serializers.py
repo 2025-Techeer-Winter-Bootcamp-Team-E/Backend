@@ -214,3 +214,21 @@ class ProductSearchResponseSerializer(serializers.Serializer):
     """상품 목록 조회 최종 응답 Serializer"""
     status = serializers.IntegerField()
     data = ProductListDataSerializer()
+
+
+# ===== AI 통합 리뷰 조회 API용 Serializer =====
+
+class ProductAIReviewSummarySerializer(serializers.Serializer):
+    """AI 통합 리뷰 요약 응답 Serializer"""
+    product_code = serializers.SerializerMethodField()
+    total_review_count = serializers.IntegerField(source='analyzed_review_count')
+    ai_summary = serializers.CharField(source='ai_review_summary', allow_null=True, default="")
+    pros = serializers.JSONField(source='ai_positive_review_analysis', default=list)
+    cons = serializers.JSONField(source='ai_negative_review_analysis', default=list)
+    recommendation_score = serializers.IntegerField(source='ai_recommendation_score')
+    score_reason = serializers.CharField(source='ai_review_analysis_basis', allow_null=True, default="")
+    last_updated = serializers.DateTimeField(source='updated_at', format='%Y-%m-%dT%H:%M:%S')
+
+    def get_product_code(self, obj):
+        """product_code를 정수형으로 반환"""
+        return int(obj.product.danawa_product_id)

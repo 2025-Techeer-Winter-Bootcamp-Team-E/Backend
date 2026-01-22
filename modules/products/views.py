@@ -19,6 +19,7 @@ from .serializers import (
     ReviewListResponseSerializer,
     ProductListItemSerializer,
     ProductSearchResponseSerializer,
+    ProductAIReviewSummarySerializer,
 )
 
 
@@ -351,4 +352,101 @@ class ProductReviewListView(APIView):
         return Response({
             "status": 200,
             "data": serializer.data
-        }, status=status.HTTP_200_OK)   
+        }, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=['Products'])
+class ProductAIReviewSummaryView(APIView):
+    """
+    AI 통합 리뷰 조회 API.
+
+    GET /api/v1/products/{product_code}/reviews/summary
+    """
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="AI 통합 리뷰 조회",
+        description="상품의 AI 분석 기반 리뷰 요약 정보를 조회합니다.",
+        responses={
+            200: OpenApiResponse(
+                description="성공",
+                response=ProductAIReviewSummarySerializer
+            ),
+            404: OpenApiResponse(description="해당 상품의 AI 분석 결과가 존재하지 않습니다."),
+            500: OpenApiResponse(description="AI 분석 처리 중 오류가 발생했습니다."),
+        }
+    )
+    def get(self, request, product_code: str):
+        try:
+            # 1. AI 리뷰 분석 결과 조회
+            ai_review = product_service.get_ai_review_summary(product_code)
+
+            # 2. 분석 결과가 없는 경우 404
+            if not ai_review:
+                return Response({
+                    "status": 404,
+                    "message": "해당 상품의 AI 분석 결과가 존재하지 않습니다."
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # 3. 시리얼라이징 및 응답
+            serializer = ProductAIReviewSummarySerializer(ai_review)
+
+            return Response({
+                "status": "success",
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                "status": 500,
+                "message": "AI 분석 처리 중 오류가 발생했습니다."
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(tags=['Products'])
+class ProductAIReviewGenerateView(APIView):
+    """
+    AI 리뷰 분석 생성 API.
+
+    POST /api/v1/products/{product_code}/reviews/summary/generate
+    """
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="AI 리뷰 분석 생성",
+        description="Gemini를 사용하여 상품의 AI 리뷰 분석을 생성합니다.",
+        responses={
+            201: OpenApiResponse(
+                description="AI 분석 생성 성공",
+                response=ProductAIReviewSummarySerializer
+            ),
+            404: OpenApiResponse(description="상품을 찾을 수 없습니다."),
+            500: OpenApiResponse(description="AI 분석 생성 중 오류가 발생했습니다."),
+        }
+    )
+    def post(self, request, product_code: str):
+        try:
+            # 1. AI 리뷰 분석 생성
+            ai_review = product_service.generate_ai_review_analysis(product_code)
+
+            # 2. 생성 실패 시 404
+            if not ai_review:
+                return Response({
+                    "status": 404,
+                    "message": "상품을 찾을 수 없습니다."
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # 3. 시리얼라이징 및 응답
+            serializer = ProductAIReviewSummarySerializer(ai_review)
+
+            return Response({
+                "status": "success",
+                "message": "AI 분석이 성공적으로 생성되었습니다.",
+                "data": serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({
+                "status": 500,
+                "message": f"AI 분석 생성 중 오류가 발생했습니다: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
