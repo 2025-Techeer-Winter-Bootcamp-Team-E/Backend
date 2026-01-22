@@ -343,8 +343,210 @@ class ProductService:
             },
             "average_rating": average_rating,
             "reviews": reviews,
-            "has_next": has_next 
+            "has_next": has_next
         }
+
+    def get_ai_review_summary(self, product_code: str):
+        """
+        상품의 AI 리뷰 분석 결과를 조회합니다.
+
+        Args:
+            product_code: 다나와 상품 코드
+
+        Returns:
+            ProductAIReviewAnalysisModel 인스턴스 또는 None
+        """
+        from .models import ProductAIReviewAnalysisModel
+
+        try:
+            return ProductAIReviewAnalysisModel.objects.select_related('product').get(
+                product__danawa_product_id=product_code,
+                deleted_at__isnull=True
+            )
+        except ProductAIReviewAnalysisModel.DoesNotExist:
+            return None
+
+    def generate_ai_review_analysis(self, product_code: str):
+        """
+        Gemini를 사용하여 상품의 AI 리뷰 분석을 생성합니다.
+
+        Args:
+            product_code: 다나와 상품 코드
+
+        Returns:
+            ProductAIReviewAnalysisModel 인스턴스 또는 None
+        """
+        import json
+        from .models import ProductAIReviewAnalysisModel
+        from shared.ai_clients import get_gemini_client
+
+        # 1. 상품 정보 조회
+        product = self.get_product_by_code(product_code)
+        if not product:
+            return None
+
+        # 2. 리뷰 데이터 조회
+        reviews_data = ProductService.get_product_reviews(product_code, page=1, size=50)
+        reviews = reviews_data.get('reviews', []) if reviews_data else []
+        # ProductModel의 review_count 사용 (DB에 저장된 총 리뷰 수)
+        review_count = product.review_count if product.review_count else 0
+
+        # 3. Gemini 프롬프트 생성
+        product_info = f"""
+상품명: {product.name}
+브랜드: {product.brand}
+가격: {product.lowest_price:,}원
+카테고리: {product.category.name if product.category else '미분류'}
+스펙: {json.dumps(product.detail_spec, ensure_ascii=False) if product.detail_spec else '정보 없음'}
+"""
+
+        review_texts = ""
+        if reviews:
+            for i, review in enumerate(reviews[:20], 1):
+                review_texts += f"\n리뷰 {i}: (평점: {review.rating}/5) {review.content[:200]}"
+        else:
+            review_texts = "\n(리뷰 데이터 없음 - 상품 정보 기반으로 분석)"
+
+        prompt = f"""
+다음 상품에 대한 리뷰 분석을 수행해주세요.
+
+{product_info}
+
+리뷰 데이터:
+{review_texts}
+
+반드시 아래 JSON 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요:
+{{
+    "ai_summary": "상품에 대한 전체적인 요약 (2-3문장)",
+    "pros": ["장점1", "장점2", "장점3"],
+    "cons": ["단점1", "단점2"],
+    "recommendation_score": 85,
+    "score_reason": "추천 점수에 대한 근거 설명 (1-2문장)"
+}}
+"""
+
+        try:
+            # 4. Gemini API 호출
+            gemini_client = get_gemini_client()
+            response_text = gemini_client.generate_content(prompt)
+
+            # 5. JSON 파싱
+            # JSON 블록 추출
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0]
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0]
+
+            analysis_result = json.loads(response_text.strip())
+
+            # 6. 기존 분석 결과가 있으면 업데이트, 없으면 생성
+            ai_analysis, created = ProductAIReviewAnalysisModel.objects.update_or_create(
+                product=product,
+                defaults={
+                    'ai_review_summary': analysis_result.get('ai_summary', ''),
+                    'ai_positive_review_analysis': analysis_result.get('pros', []),
+                    'ai_negative_review_analysis': analysis_result.get('cons', []),
+                    'ai_recommendation_score': analysis_result.get('recommendation_score', 0),
+                    'ai_review_analysis_basis': analysis_result.get('score_reason', ''),
+                    'analyzed_review_count': review_count,
+                    'deleted_at': None,
+                }
+            )
+
+            return ai_analysis
+
+        except Exception as e:
+            print(f"AI 분석 생성 오류: {e}")
+            return None
+
+    def generate_ai_reviews_for_all_products_with_reviews(self):
+        """
+        리뷰가 있는 모든 상품에 대해 AI 리뷰 분석을 생성합니다.
+
+        Returns:
+            dict: {
+                'success_count': int,
+                'failed_count': int,
+                'skipped_count': int,
+                'results': list
+            }
+        """
+        import time
+        from .models import ProductAIReviewAnalysisModel
+
+        # 리뷰가 있는 상품 조회 (review_count > 0)
+        products_with_reviews = ProductModel.objects.filter(
+            deleted_at__isnull=True,
+            review_count__gt=0
+        ).order_by('-review_count')
+
+        results = {
+            'success_count': 0,
+            'failed_count': 0,
+            'skipped_count': 0,
+            'results': []
+        }
+
+        total = products_with_reviews.count()
+        print(f"총 {total}개의 상품에 대해 AI 리뷰 분석을 생성합니다...")
+
+        for i, product in enumerate(products_with_reviews, 1):
+            product_code = product.danawa_product_id
+
+            # 이미 분석 결과가 있는지 확인
+            existing = ProductAIReviewAnalysisModel.objects.filter(
+                product=product,
+                deleted_at__isnull=True
+            ).exists()
+
+            if existing:
+                results['skipped_count'] += 1
+                results['results'].append({
+                    'product_code': product_code,
+                    'product_name': product.name,
+                    'status': 'skipped',
+                    'message': '이미 분석 결과가 존재합니다.'
+                })
+                print(f"[{i}/{total}] {product_code} - 건너뜀 (이미 존재)")
+                continue
+
+            try:
+                ai_review = self.generate_ai_review_analysis(product_code)
+                if ai_review:
+                    results['success_count'] += 1
+                    results['results'].append({
+                        'product_code': product_code,
+                        'product_name': product.name,
+                        'status': 'success',
+                        'recommendation_score': ai_review.ai_recommendation_score
+                    })
+                    print(f"[{i}/{total}] {product_code} - 성공 (추천점수: {ai_review.ai_recommendation_score})")
+                else:
+                    results['failed_count'] += 1
+                    results['results'].append({
+                        'product_code': product_code,
+                        'product_name': product.name,
+                        'status': 'failed',
+                        'message': '생성 실패'
+                    })
+                    print(f"[{i}/{total}] {product_code} - 실패")
+
+                # API 호출 간격 조절 (rate limit 방지)
+                time.sleep(1)
+
+            except Exception as e:
+                results['failed_count'] += 1
+                results['results'].append({
+                    'product_code': product_code,
+                    'product_name': product.name,
+                    'status': 'failed',
+                    'message': str(e)
+                })
+                print(f"[{i}/{total}] {product_code} - 오류: {e}")
+
+        print(f"\n완료! 성공: {results['success_count']}, 실패: {results['failed_count']}, 건너뜀: {results['skipped_count']}")
+        return results
+
 
 class MallInformationService:
     """
