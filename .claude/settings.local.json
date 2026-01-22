@@ -44,8 +44,7 @@
       "Bash(git add:*)",
       "Bash(docker cp:*)",
       "Bash(docker restart:*)",
-      "Bash(DJANGO_SETTINGS_MODULE=config.settings.dev python:*)",
-      "Bash(grep:*)"
+      "Bash(DJANGO_SETTINGS_MODULE=config.settings.dev python:*)"
     ]
   }
 }
