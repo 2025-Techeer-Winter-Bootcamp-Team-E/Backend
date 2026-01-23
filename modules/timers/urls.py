@@ -9,6 +9,6 @@ app_name = 'timers'
 
 urlpatterns = [
     path('', TimerListCreateView.as_view(), name='timer-list-create'),
-    path('<str:product_code>/', TimerByProductView.as_view(), name='timer-by-product'),
     path('detail/<int:timer_id>/', TimerDetailView.as_view(), name='timer-detail'),
+    path('<str:product_code>/', TimerByProductView.as_view(), name='timer-by-product'),
 ]
