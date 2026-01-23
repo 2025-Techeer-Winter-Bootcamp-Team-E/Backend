@@ -287,33 +287,25 @@ class CartItemDeleteView(APIView):
                     'message': '서버 내부 오류가 발생했습니다.'
                 }
             }
-        },
-        summary="Remove item from cart",
-        description="장바구니에서 상품 삭제",
+        }, # Removed 404 for product not found
+        summary="Remove cart item",
+        description="장바구니에서 특정 항목 삭제",
     )
-    def delete(self, request, product_code: str):
+    def delete(self, request, cart_item_id: int): # Changed parameter name and type
         try:
-            # Check if product exists
-            from modules.products.models import ProductModel
-            try:
-                product = ProductModel.objects.get(danawa_product_id=product_code, deleted_at__isnull=True)
-            except ProductModel.DoesNotExist:
-                return Response(
-                    {
-                        'status': 404,
-                        'message': '해당 상품을 찾을 수 없습니다.',
-                    },
-                    status=status.HTTP_404_NOT_FOUND
-                )
+            # Product existence check is no longer needed here
             
+            # Get the user's cart
             cart = cart_service.get_or_create_cart(request.user.id)
-            removed = cart_service.remove_item(cart.id, product.danawa_product_id)
+            
+            # Attempt to remove the item using cart_item_id
+            removed = cart_service.remove_item(cart.id, cart_item_id)
             
             if not removed:
                 return Response(
                     {
-                        'status': 400,
-                        'message': '잘못된 요청이거나 장바구니에 해당 상품이 없습니다.',
+                        'status': 400, # Bad Request if item not found or not in user's cart
+                        'message': '잘못된 요청이거나 해당 장바구니 항목을 찾을 수 없습니다.',
                     },
                     status=status.HTTP_400_BAD_REQUEST    
                 )
@@ -326,7 +318,7 @@ class CartItemDeleteView(APIView):
                 status=status.HTTP_200_OK
             )
         except Exception as e:
-            logger.error(f"장바구니 삭제 중 서버 오류 발생: {str(e)}", exc_info=True)
+            logger.error(f"장바구니 항목 삭제 중 서버 오류 발생: {str(e)}", exc_info=True)
             return Response(
                 {
                     'status': 500,

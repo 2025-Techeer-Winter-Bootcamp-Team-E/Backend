@@ -68,14 +68,14 @@ class CartService:
     def update_item_quantity(
         self,
         cart_id: int,
-        product_id: int,
+        danawa_product_id: str,
         quantity: int,
     ) -> Optional[CartItemModel]:
         """Update cart item quantity."""
         try:
             cart_item = CartItemModel.objects.get(
                 cart_id=cart_id,
-                product_id=product_id,
+                product__danawa_product_id=danawa_product_id,
                 deleted_at__isnull=True
             )
             if quantity <= 0:
@@ -89,14 +89,14 @@ class CartService:
         except CartItemModel.DoesNotExist:
             raise CartNotFoundError(f"Cart {cart_id}")
 
-    def remove_item(self, cart_id: int, danawa_product_id: str) -> bool:
+    def remove_item(self, cart_id: int, cart_item_id: int) -> bool:
         """Remove item from cart (soft delete)."""
         try:
             cart_item = CartItemModel.objects.get(
-                cart_id=cart_id,
-                product_id=danawa_product_id,
+                id=cart_item_id, # Lookup by cart_item_id
+                cart_id=cart_id, # Ensure the item belongs to the user's cart
                 deleted_at__isnull=True
-            )
+            ) 
             cart_item.deleted_at = datetime.now()
             cart_item.save()
             return True
