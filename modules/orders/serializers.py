@@ -27,6 +27,11 @@ class CartItemUpdateSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=0)
 
 
+class CartItemDeleteResponseSerializer(serializers.Serializer):
+    """Serializer for cart item deletion response."""
+    status = serializers.IntegerField()
+    message = serializers.CharField()
+
 class CartSerializer(serializers.Serializer):
     """Serializer for cart output."""
     id = serializers.IntegerField(read_only=True)

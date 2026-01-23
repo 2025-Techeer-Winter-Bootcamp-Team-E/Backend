@@ -67,15 +67,15 @@ class CartService:
 
     def update_item_quantity(
         self,
-        cart_id: int,
-        danawa_product_id: str,
+        cart_id: int, # Ensure the item belongs to this cart
+        cart_item_id: int, # The ID of the specific cart item to update
         quantity: int,
     ) -> Optional[CartItemModel]:
         """Update cart item quantity."""
         try:
             cart_item = CartItemModel.objects.get(
                 cart_id=cart_id,
-                product__danawa_product_id=danawa_product_id,
+                id=cart_item_id, # Lookup by cart_item_id
                 deleted_at__isnull=True
             )
             if quantity <= 0:

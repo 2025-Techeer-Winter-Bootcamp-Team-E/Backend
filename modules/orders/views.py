@@ -17,6 +17,7 @@ from .serializers import (
     CartItemUpdateSerializer,
     OrderSerializer,
     OrderHistorySerializer,
+    CartItemDeleteResponseSerializer,
     ReviewSerializer,
     ReviewCreateSerializer,
     TokenRechargeSerializer,
@@ -247,9 +248,161 @@ class CartItemListCreateView(APIView):
             )
 
 
+@extend_schema(tags=['Orders']) # Renamed from CartItemDeleteView
+class CartItemDetailView(APIView):
+    """Cart item detail endpoint (update quantity, delete item)."""
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=CartItemUpdateSerializer,
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                    'data': {
+                        'type': 'object',
+                        'properties': {
+                            'cart_item_id': {'type': 'integer'},
+                            'product_code': {'type': 'string'},
+                            'quantity': {'type': 'integer'},
+                        }
+                    }
+                },
+                'example': {
+                    'status': 200,
+                    'message': '장바구니 항목 수량이 업데이트되었습니다.',
+                    'data': {
+                        'cart_item_id': 10,
+                        'product_code': '1234567890',
+                        'quantity': 3,
+                    }
+                }
+            },
+            200: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 200,
+                    'message': '장바구니 항목이 삭제되었습니다.'
+                }
+            },
+            # 기존 400 응답은 CartNotFoundError 발생 시에만 사용
+            # 500 응답은 그대로 유지
+            # 404 응답은 CartNotFoundError에서 처리되므로 제거
+            400: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 400,
+                    'message': '잘못된 요청이거나 해당 장바구니 항목을 찾을 수 없습니다.'
+                },
+            },
+            500: {
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'integer'},
+                    'message': {'type': 'string'},
+                },
+                'example': {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.'
+                }
+            }
+        },
+        summary="Update cart item quantity",
+        description="장바구니 항목 수량 변경",
+    )
+    def patch(self, request, cart_item_id: int):
+        try:
+            serializer = CartItemUpdateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            quantity = serializer.validated_data['quantity']
+
+            cart = cart_service.get_or_create_cart(request.user.id)
+            updated_item = cart_service.update_item_quantity(cart.id, cart_item_id, quantity)
+
+            if not updated_item:
+                # 수량이 0 이하로 설정되어 항목이 삭제된 경우
+                return Response(
+                    {'status': 200, 'message': '장바구니 항목이 삭제되었습니다.'},
+                    status=status.HTTP_200_OK
+                )
+            else:
+                # 수량이 정상적으로 업데이트된 경우
+                return Response(
+                    {'status': 200, 'message': '장바구니 항목 수량이 업데이트되었습니다.', 'data': {
+                        'cart_item_id': updated_item.id,
+                        'product_code': updated_item.product.danawa_product_id,
+                        'quantity': updated_item.quantity,
+                    }},
+                    status=status.HTTP_200_OK
+                )
+        except CartNotFoundError:
+            # 장바구니 항목을 찾을 수 없는 경우 (예: 잘못된 cart_item_id)
+            return Response(
+                {'status': 400, 'message': '잘못된 요청이거나 해당 장바구니 항목을 찾을 수 없습니다.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"장바구니 항목 수량 변경 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {'status': 500, 'message': '서버 내부 오류가 발생했습니다.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @extend_schema(
+        # ... (responses for DELETE are already here) ...
+        summary="Remove cart item",
+        description="장바구니에서 특정 항목 삭제",
+    )
+    def delete(self, request, cart_item_id: int): # Changed parameter name and type
+        try:
+            # Product existence check is no longer needed here
+            
+            # Get the user's cart
+            cart = cart_service.get_or_create_cart(request.user.id)
+            
+            # Attempt to remove the item using cart_item_id
+            removed = cart_service.remove_item(cart.id, cart_item_id)
+            
+            if not removed:
+                return Response(
+                    {
+                        'status': 400, # Bad Request if item not found or not in user's cart
+                        'message': '잘못된 요청이거나 해당 장바구니 항목을 찾을 수 없습니다.',
+                    },
+                    status=status.HTTP_400_BAD_REQUEST    
+                )
+            
+            return Response(
+                {
+                    'status': 200,
+                    'message': '장바구니에서 항목이 삭제되었습니다.',
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"장바구니 항목 삭제 중 서버 오류 발생: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'status': 500,
+                    'message': '서버 내부 오류가 발생했습니다.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 @extend_schema(tags=['Orders'])
-class CartItemDeleteView(APIView):
-    """Cart item delete endpoint."""
+class CartPaymentView(APIView):
+    """Cart payment endpoint."""
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
