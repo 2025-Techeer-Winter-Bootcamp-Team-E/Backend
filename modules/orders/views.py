@@ -539,7 +539,6 @@ class CartPaymentView(APIView):
             serializer.is_valid(raise_exception=True)
 
             items = serializer.validated_data['items']
-            total_price = serializer.validated_data['total_price']
 
             # Check if items list is empty
             if not items or len(items) == 0:
@@ -557,21 +556,40 @@ class CartPaymentView(APIView):
                 for item in items
             ]
 
-            order, new_balance, cart_items = order_history_service.purchase_cart_items_with_tokens(
+            order, new_balance, cart_items, calculated_total_price = order_history_service.purchase_cart_items_with_tokens(
                 user_id=request.user.id,
                 cart_item_ids_with_quantities=cart_item_ids_with_quantities,
-                total_price=total_price,
             )
 
             # Format order_id: ORD-YYYYMMDD-XXX
             order_date = order.created_at.strftime('%Y%m%d')
             order_id_formatted = f"ORD-{order_date}-{str(order.id).zfill(3)}"
+            ordered_at = order.created_at.isoformat()
 
-            # Format order_items
-            order_items = [
-                {'cart_item_id': item['cart_item_id'], 'quantity': item['quantity']}
-                for item in items
-            ]
+            # Format a detailed list of ordered items for the response
+            request_quantities = {item['cart_item_id']: item['quantity'] for item in items}
+            order_items_details = []
+            for cart_item in cart_items:
+                price = cart_item.product.lowest_price or 0
+                quantity = request_quantities.get(cart_item.id, 0)
+                
+                # Get representative image URL
+                product_image_url = ''
+                try:
+                    mall_info = cart_item.product.mall_information.filter(deleted_at__isnull=True).first()
+                    if mall_info and mall_info.representative_image_url:
+                        product_image_url = mall_info.representative_image_url
+                except Exception:
+                    pass
+
+                order_items_details.append({
+                    'product_code': cart_item.product.danawa_product_id,
+                    'product_name': cart_item.product.name,
+                    'product_image_url': product_image_url,
+                    'quantity': quantity,
+                    'price_per_item': price,
+                    'total_price_for_item': price * quantity,
+                })
 
             return Response(
                 {
@@ -579,10 +597,11 @@ class CartPaymentView(APIView):
                     'message': '장바구니 상품 결제가 성공적으로 완료되었습니다.',
                     'data': {
                         'order_id': order_id_formatted,
-                        'order_items': order_items,
-                        'total_price': total_price,
+                        'order_items': order_items_details,
+                        'total_price': calculated_total_price,
                         'current_tokens': new_balance,
                         'order_status': 'success',
+                        'ordered_at': ordered_at,
                     }
                 },
                 status=status.HTTP_201_CREATED
@@ -769,7 +788,10 @@ class TokenPurchaseView(APIView):
                         'type': 'object',
                         'properties': {
                             'order_id': {'type': 'string'},
-                            'product_name': {'type': 'string'},
+                            'order_items': {
+                                'type': 'array',
+                                'items': {'type': 'object'}  # 상세 구조는 생략하더라도 배열임은 명시
+                            },
                             'total_price': {'type': 'integer'},
                             'current_tokens': {'type': 'integer'},
                             'order_status': {'type': 'string'},
@@ -809,14 +831,12 @@ class TokenPurchaseView(APIView):
 
         product_code = serializer.validated_data['product_code']
         quantity = serializer.validated_data['quantity']
-        total_price = serializer.validated_data['total_price']
 
         try:
-            order, new_balance, product = order_history_service.purchase_with_tokens(
+            order, new_balance, product, calculated_total_price = order_history_service.purchase_with_tokens(
                 user_id=request.user.id,
                 product_code=product_code,
                 quantity=quantity,
-                total_price=total_price,
             )
 
             # Format order_id: ORD-YYYYMMDD-XXX (XXX는 order.id를 3자리로 포맷)
@@ -824,14 +844,33 @@ class TokenPurchaseView(APIView):
             order_id_formatted = f"ORD-{order_date}-{str(order.id).zfill(3)}"
             ordered_at = order.created_at.isoformat()
 
+            # Get representative image URL
+            product_image_url = ''
+            try:
+                mall_info = product.mall_information.filter(deleted_at__isnull=True).first()
+                if mall_info and mall_info.representative_image_url:
+                    product_image_url = mall_info.representative_image_url
+            except Exception:
+                pass
+
+            # Create a detailed order item list for a consistent response format
+            order_items_details = [{
+                'product_code': product.danawa_product_id,
+                'product_name': product.name,
+                'product_image_url': product_image_url,
+                'quantity': quantity,
+                'price_per_item': product.lowest_price or 0,
+                'total_price_for_item': calculated_total_price,
+            }]
+
             return Response(
                 {
                     'status': 201,
                     'message': '결제가 완료되었습니다.',
                     'data': {
                         'order_id': order_id_formatted,
-                        'product_name': product.name,
-                        'total_price': total_price,
+                        'order_items': order_items_details,
+                        'total_price': calculated_total_price,
                         'current_tokens': new_balance,
                         'order_status': 'success',
                         'ordered_at': ordered_at,

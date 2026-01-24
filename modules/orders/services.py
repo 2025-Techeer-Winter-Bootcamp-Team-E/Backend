@@ -232,8 +232,7 @@ class OrderHistoryService:
         user_id: int,
         product_code: str,
         quantity: int,
-        total_price: int,
-    ) -> tuple[OrderModel, int, 'ProductModel']:
+    ) -> tuple[OrderModel, int, 'ProductModel', int]:
         """
         Purchase product using tokens.
         
@@ -241,10 +240,9 @@ class OrderHistoryService:
             user_id: User ID
             product_code: Product code (danawa_product_id)
             quantity: Quantity to purchase
-            total_price: Total price in tokens
             
         Returns:
-            Tuple of (OrderModel, new_token_balance)
+            Tuple of (OrderModel, new_token_balance, ProductModel, calculated_total_price)
             
         Raises:
             InsufficientTokenBalanceError: If user doesn't have enough tokens
@@ -252,24 +250,27 @@ class OrderHistoryService:
         from modules.users.models import UserModel
         from modules.products.models import ProductModel
         
-        # Get user and check token balance
+        # Get user
         try:
             user = UserModel.objects.get(id=user_id, deleted_at__isnull=True)
         except UserModel.DoesNotExist:
             raise OrderNotFoundError(f"User {user_id}")
         
-        current_balance = user.token_balance or 0
-        if current_balance < total_price:
-            raise InsufficientTokenBalanceError(required=total_price, available=current_balance)
-        
-        # Get product
+        # Get product and calculate price on the server
         try:
             product = ProductModel.objects.get(danawa_product_id=product_code, deleted_at__isnull=True)
         except ProductModel.DoesNotExist:
             raise OrderNotFoundError(f"Product {product_code}")
         
+        calculated_total_price = (product.lowest_price or 0) * quantity
+        
+        # Check token balance
+        current_balance = user.token_balance or 0
+        if current_balance < calculated_total_price:
+            raise InsufficientTokenBalanceError(required=calculated_total_price, available=current_balance)
+        
         # Deduct tokens
-        new_balance = current_balance - total_price
+        new_balance = current_balance - calculated_total_price
         user.token_balance = new_balance
         user.save()
         
@@ -287,30 +288,28 @@ class OrderHistoryService:
         self.create_order_history(
             user_id=user_id,
             transaction_type='payment',
-            token_change=-total_price,  # Negative for payment
+            token_change=-calculated_total_price,  # Negative for payment
             token_balance_after=new_balance,
             danawa_product_id=product.danawa_product_id,
         )
         
-        return order, new_balance, product
+        return order, new_balance, product, calculated_total_price
 
     @transaction.atomic
     def purchase_cart_items_with_tokens(
         self,
         user_id: int,
         cart_item_ids_with_quantities: List[dict],
-        total_price: int,
-    ) -> tuple[OrderModel, int, List[CartItemModel]]:
+    ) -> tuple[OrderModel, int, List[CartItemModel], int]:
         """
         Purchase cart items using tokens.
         
         Args:
             user_id: User ID
             cart_item_ids_with_quantities: List of dicts with {'cart_item_id': int, 'quantity': int}
-            total_price: Total price in tokens
             
         Returns:
-            Tuple of (OrderModel, new_token_balance, List[CartItemModel])
+            Tuple of (OrderModel, new_token_balance, List[CartItemModel], calculated_total_price)
             
         Raises:
             InsufficientTokenBalanceError: If user doesn't have enough tokens
@@ -318,40 +317,45 @@ class OrderHistoryService:
         """
         from modules.users.models import UserModel
         
-        # Get user and check token balance
+        # Get user
         try:
             user = UserModel.objects.get(id=user_id, deleted_at__isnull=True)
         except UserModel.DoesNotExist:
             raise OrderNotFoundError(f"User {user_id}")
         
-        current_balance = user.token_balance or 0
-        if current_balance < total_price:
-            raise InsufficientTokenBalanceError(required=total_price, available=current_balance)
-        
         # Get cart
         cart = self.cart_service.get_or_create_cart(user_id)
         
-        # Get cart items
+        # Get cart items and calculate total price on the server
         cart_items = []
+        calculated_total_price = 0
         for item_data in cart_item_ids_with_quantities:
             cart_item_id = item_data['cart_item_id']
             quantity = item_data['quantity']
             
             try:
                 cart_item = CartItemModel.objects.select_related('product').get(
-                    id=cart_item_id,
-                    cart_id=cart.id,
-                    deleted_at__isnull=True
+                    id=cart_item_id, cart_id=cart.id, deleted_at__isnull=True
                 )
+                if not cart_item.product or cart_item.product.deleted_at is not None:
+                    raise OrderNotFoundError(f"Product for cart item {cart_item_id} is not available")
+                
+                price = cart_item.product.lowest_price or 0
+                calculated_total_price += price * quantity
                 cart_items.append(cart_item)
             except CartItemModel.DoesNotExist:
                 raise OrderNotFoundError(f"Cart item {cart_item_id}")
         
         if not cart_items:
             raise OrderNotFoundError("No cart items found")
-        
+
+        # Check token balance
+        current_balance = user.token_balance or 0
+        if current_balance < calculated_total_price:
+            raise InsufficientTokenBalanceError(required=calculated_total_price, available=current_balance)
+
         # Deduct tokens
-        new_balance = current_balance - total_price
+        new_balance = current_balance - calculated_total_price
         user.token_balance = new_balance
         user.save()
         
@@ -391,12 +395,12 @@ class OrderHistoryService:
         self.create_order_history(
             user_id=user_id,
             transaction_type='payment',
-            token_change=-total_price,
+            token_change=-calculated_total_price,
             token_balance_after=new_balance,
             danawa_product_id=first_product_id,
         )
         
-        return order, new_balance, cart_items
+        return order, new_balance, cart_items, calculated_total_price
 
 
 class ReviewService:
