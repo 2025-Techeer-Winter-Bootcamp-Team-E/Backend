@@ -170,63 +170,31 @@ class ProductService:
     ) -> dict:
         """
         다중 조건 필터링 및 검색 기능이 포함된 상품 목록 조회.
-
-        Args:
-            query: 검색어 (상품명, 브랜드)
-            main_cat: 대분류 카테고리 이름
-            sub_cat: 중분류 카테고리 이름
-            brand: 브랜드/제조사
-            min_price: 최소 가격
-            max_price: 최대 가격
-            sort: 정렬 (price_low, price_high, popular)
-            page: 페이지 번호
-            page_size: 페이지 크기
-
-        Returns:
-            dict: {
-                'products': List[ProductModel],
-                'total_count': int,
-                'page': int,
-                'page_size': int,
-                'total_pages': int
-            }
         """
         from modules.categories.models import CategoryModel
-        from django.db.models import Prefetch
+        from django.db.models import Prefetch, Q
+        import math
 
         queryset = ProductModel.objects.filter(deleted_at__isnull=True)
 
-        # 1. 검색어 필터 (q)
+        # 1. 검색어 필터 (query)
         if query:
             queryset = queryset.filter(
                 Q(name__icontains=query) | Q(brand__icontains=query)
             )
 
-        # 2. 대분류 필터 (main_cat) - level 제한 없이 검색하되, 가장 상위 레벨 우선
-        main_category = None
-        if main_cat:
-            main_category = CategoryModel.objects.filter(
-                name__icontains=main_cat,
-                deleted_at__isnull=True
-            ).order_by('level').first()
-            if main_category:
-                category_ids = self._get_descendant_category_ids(main_category.id)
-                queryset = queryset.filter(category_id__in=category_ids)
+        # 2 & 3. 카테고리 필터 통합 (이름 매칭 대신 ID 직접 사용)
+        target_id = sub_cat if sub_cat else main_cat
 
-        # 3. 중분류 필터 (sub_cat) - level 제한 없이 검색
-        if sub_cat:
-            sub_query = CategoryModel.objects.filter(
-                name__icontains=sub_cat,
-                deleted_at__isnull=True
-            )
-            # main_cat이 설정된 경우 main_category의 하위 카테고리에서만 검색
-            if main_cat and main_category:
-                main_descendant_ids = self._get_descendant_category_ids(main_category.id)
-                sub_query = sub_query.filter(id__in=main_descendant_ids)
-            sub_category = sub_query.order_by('level').first()
-            if sub_category:
-                category_ids = self._get_descendant_category_ids(sub_category.id)
+        if target_id:
+            try:
+                # 1. ID값을 숫자로 변환 후, 하위 카테고리 ID들을 싹 가져옴
+                category_ids = self._get_descendant_category_ids(int(target_id))
+                # 2. 해당 카테고리들에 속한 상품들만 필터링
                 queryset = queryset.filter(category_id__in=category_ids)
+            except (ValueError, TypeError):
+                # ID가 숫자가 아니거나 잘못된 값일 경우 필터링 수행 안 함
+                pass
 
         # 4. 브랜드 필터 (brand)
         if brand:
