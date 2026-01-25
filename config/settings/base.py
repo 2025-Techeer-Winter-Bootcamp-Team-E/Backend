@@ -35,7 +35,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
-    'rest_framework_simplejwt.token_blacklist',
+    # 'rest_framework_simplejwt.token_blacklist',  # 제거: token_blacklist 테이블 불필요
     'corsheaders',
     'django_filters',
     'drf_spectacular',
@@ -173,7 +173,7 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
+    'BLACKLIST_AFTER_ROTATION': False,  # token_blacklist 앱 제거로 비활성화
     'UPDATE_LAST_LOGIN': True,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
@@ -185,24 +185,34 @@ SIMPLE_JWT = {
 
 # DRF Spectacular (Swagger) Settings
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'E-commerce Backend API',
-    'DESCRIPTION': 'DDD Architecture based E-commerce Backend API',
+    'TITLE': '컴퓨터 쇼핑 AI에이전트 API',
+    'DESCRIPTION': '컴퓨터 쇼핑 AI에이전트 백엔드 API 문서입니다.',
     'VERSION': '1.0.0',
+
+    'SECURITY': [{'BearerAuth': []}],
+    'SECURITY_SCHEMES': {
+        'BearerAuth': {
+            'type': 'http',
+            'scheme': 'bearer',
+            'bearerFormat': 'JWT',
+        }
+    },
+
+    
     'SERVE_INCLUDE_SCHEMA': False,
     'SWAGGER_UI_DIST': 'SIDECAR',
     'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
     'REDOC_DIST': 'SIDECAR',
     'COMPONENT_SPLIT_REQUEST': True,
     'SCHEMA_PATH_PREFIX': r'/api/v[0-9]',
+    'EXCLUDE_PATH_REGEX': [r'^/api/v1/health/.*$', r'^/api/v1/health/$'],
     'TAGS': [
-        {'name': 'Auth', 'description': 'Authentication endpoints'},
-        {'name': 'Users', 'description': 'User management endpoints'},
-        {'name': 'Products', 'description': 'Product management endpoints'},
-        {'name': 'Orders', 'description': 'Order management endpoints'},
-        {'name': 'Cart', 'description': 'Shopping cart endpoints'},
-        {'name': 'Categories', 'description': 'Category management endpoints'},
-        {'name': 'Search', 'description': 'Search endpoints'},
-        {'name': 'Price Prediction', 'description': 'Price prediction endpoints'},
+        {'name': 'Users', 'description': '회원관리 및 인증 endpoints'},
+        {'name': 'Products', 'description': '상품 관리 endpoints'},
+        {'name': 'Orders', 'description': '주문 관리 endpoints'},
+        {'name': 'Categories', 'description': '카테고리 관리 endpoints'},
+        {'name': 'Search', 'description': '검색 endpoints'},
+        {'name': 'Timers', 'description': '가격 타이머 및 알림 endpoints'},
     ],
 }
 
@@ -253,7 +263,7 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 
 # Embedding Settings
-EMBEDDING_MODEL = 'text-embedding-ada-002'
+EMBEDDING_MODEL = 'text-embedding-3-small'
 EMBEDDING_DIMENSIONS = 1536
 
 # Logging

@@ -3,12 +3,14 @@ Health check views.
 """
 from django.db import connection
 from django.core.cache import cache
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 
+@extend_schema(exclude=True)
 class HealthCheckView(APIView):
     """Basic health check endpoint."""
     permission_classes = [AllowAny]
@@ -17,6 +19,7 @@ class HealthCheckView(APIView):
         return Response({'status': 'healthy'})
 
 
+@extend_schema(exclude=True)
 class ReadinessCheckView(APIView):
     """Readiness check - verifies all dependencies are available."""
     permission_classes = [AllowAny]
@@ -58,6 +61,7 @@ class ReadinessCheckView(APIView):
             return {'healthy': False, 'error': str(e)}
 
 
+@extend_schema(exclude=True)
 class LivenessCheckView(APIView):
     """Liveness check - basic app responsiveness."""
     permission_classes = [AllowAny]

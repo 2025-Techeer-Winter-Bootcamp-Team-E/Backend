@@ -4,28 +4,19 @@ Orders module URLs.
 from django.urls import path
 
 from .views import (
-    StorageListView,
-    StorageItemView,
-    PurchaseListCreateView,
-    PurchaseDetailView,
-    TokenHistoryListView,
-    ReviewListCreateView,
-    ProductReviewListView,
+    TokenRechargeView,
+    TokenBalanceView,
+    TokenPurchaseView,
+    CartItemListCreateView,
+    CartItemDeleteView,
+    CartPaymentView,
 )
 
 urlpatterns = [
-    # Storage (장바구니)
-    path('storage/', StorageListView.as_view(), name='storage-list'),
-    path('storage/<int:product_id>/', StorageItemView.as_view(), name='storage-item'),
-
-    # Purchase (구매)
-    path('purchases/', PurchaseListCreateView.as_view(), name='purchase-list'),
-    path('purchases/<int:purchase_id>/', PurchaseDetailView.as_view(), name='purchase-detail'),
-
-    # Token History
-    path('token-histories/', TokenHistoryListView.as_view(), name='token-history-list'),
-
-    # Reviews
-    path('reviews/', ReviewListCreateView.as_view(), name='review-list'),
-    path('reviews/product/<int:product_id>/', ProductReviewListView.as_view(), name='product-review-list'),
+    path('tokens/recharge/', TokenRechargeView.as_view(), name='token-recharge'),
+    path('tokens/', TokenBalanceView.as_view(), name='token-balance'),
+    path('purchase/', TokenPurchaseView.as_view(), name='token-purchase'),
+    path('cart/checkout/', CartPaymentView.as_view(), name='cart-payment'),
+    path('cart/<int:cart_item_id>/', CartItemDeleteView.as_view(), name='cart-item-delete'),
+    path('cart/', CartItemListCreateView.as_view(), name='cart-items'),
 ]

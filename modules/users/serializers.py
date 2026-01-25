@@ -1,72 +1,45 @@
-"""
-Users module serializers.
-"""
 from rest_framework import serializers
-
+from django.contrib.auth import authenticate
 from .models import UserModel
 
+# 1. 회원가입 데이터를 담을 그릇(Serializer)의 이름을 정합니다.
+class UserSignupSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+    # 이메일 중복 체크 로직
+    def validate_email(self, value):
+        """이메일이 이미 존재하는지 확인합니다."""
+        if UserModel.objects.filter(email=value).exists():
+            raise serializers.ValidationError("이미 존재하는 이메일입니다.")
+        return value
+    
+    class Meta: 
+        model=UserModel 
+        fields=['id', 'email', 'password','nickname','name','phone','created_at']
+        extra_kwargs = {
+            'password': {'write_only': True},
+            'id': {'read_only': True},        # 출력만 하고 입력은 안 받음 (명세서 반영)
+            'created_at': {'read_only': True},
+        }
 
-class UserSerializer(serializers.ModelSerializer):
-    """Serializer for user output."""
-
+class UserLoginSerializer(serializers.Serializer):
+    email=serializers.EmailField()
+    password=serializers.CharField(style={'input_type':'password'})
+    
+    def validate(self, data):
+        email=data['email']
+        password=data['password']
+        user=authenticate(username=email,password=password)
+        if user is not None:
+            data['user']=user
+            return data
+        else:
+            raise serializers.ValidationError("이메일 또는 비밀번호가 일치하지 않습니다.")
+        
+class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserModel
-        fields = [
-            'id',
-            'email',
-            'nickname',
-            'token_balance',
-            'social_provider',
-            'is_active',
-            'created_at',
-            'updated_at',
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        # 명세서 Response Body의 data 안에 있는 필드들과 일치시킵니다.
+        fields = ['name', 'email', 'nickname', 'phone']
 
 
-class UserCreateSerializer(serializers.Serializer):
-    """Serializer for user registration."""
-
-    email = serializers.EmailField()
-    nickname = serializers.CharField(min_length=2, max_length=50)
-    password = serializers.CharField(min_length=8, write_only=True)
-
-
-class UserUpdateSerializer(serializers.Serializer):
-    """Serializer for user profile update."""
-
-    nickname = serializers.CharField(min_length=2, max_length=50, required=False)
-
-
-class LoginSerializer(serializers.Serializer):
-    """Serializer for login request."""
-
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-
-
-class TokenSerializer(serializers.Serializer):
-    """Serializer for token response."""
-
-    access_token = serializers.CharField(read_only=True)
-    refresh_token = serializers.CharField(read_only=True)
-    token_type = serializers.CharField(read_only=True, default="Bearer")
-
-
-class RefreshTokenSerializer(serializers.Serializer):
-    """Serializer for refresh token request."""
-
-    refresh_token = serializers.CharField()
-
-
-class SocialLoginSerializer(serializers.Serializer):
-    """Serializer for social login request."""
-
-    provider = serializers.ChoiceField(choices=['google', 'kakao', 'naver'])
-    access_token = serializers.CharField()
-
-
-class TokenBalanceSerializer(serializers.Serializer):
-    """Serializer for token balance update."""
-
-    amount = serializers.IntegerField()
+            

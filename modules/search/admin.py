@@ -3,7 +3,7 @@ Search admin configuration.
 """
 from django.contrib import admin
 
-from .models import SearchModel, RecentViewModel
+from .models import SearchModel, RecentViewProductModel
 
 
 @admin.register(SearchModel)
@@ -25,18 +25,18 @@ class SearchAdmin(admin.ModelAdmin):
     ordering = ['-searched_at']
 
 
-@admin.register(RecentViewModel)
-class RecentViewAdmin(admin.ModelAdmin):
-    """Admin for recent views."""
+@admin.register(RecentViewProductModel)
+class RecentViewProductAdmin(admin.ModelAdmin):
+    """Admin for recent view products."""
 
     list_display = [
         'id',
         'user',
-        'product',
+        'danawa_product_id',
         'created_at',
         'updated_at',
     ]
     list_filter = ['created_at', 'updated_at']
-    search_fields = ['user__email', 'product__name']
+    search_fields = ['user__email', 'danawa_product_id']
     readonly_fields = ['id', 'created_at', 'updated_at']
     ordering = ['-updated_at']

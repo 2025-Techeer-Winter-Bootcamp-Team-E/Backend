@@ -69,3 +69,26 @@ class OrderCannotBeCancelledError(BusinessRuleError):
         )
         self.order_id = order_id
         self.status = status
+
+
+class InvalidRechargeAmountError(BusinessRuleError):
+    """Raised when recharge amount is below minimum."""
+
+    def __init__(self, minimum_amount: int):
+        super().__init__(
+            message=f"최소 충전 금액은 {minimum_amount:,}원입니다.",
+            rule="MINIMUM_RECHARGE_AMOUNT"
+        )
+        self.minimum_amount = minimum_amount
+
+
+class InsufficientTokenBalanceError(BusinessRuleError):
+    """Raised when user doesn't have enough tokens for purchase."""
+
+    def __init__(self, required: int, available: int):
+        super().__init__(
+            message=f"토큰 잔액이 부족합니다. 필요: {required:,}원, 보유: {available:,}원",
+            rule="SUFFICIENT_TOKEN_BALANCE"
+        )
+        self.required = required
+        self.available = available

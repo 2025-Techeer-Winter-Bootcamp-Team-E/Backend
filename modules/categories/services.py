@@ -141,3 +141,64 @@ class CategoryService:
             'level': category.level,
             'children': [self._build_tree_node(child) for child in children]
         }
+
+    def get_product_filter_categories(self) -> List[Dict[str, Any]]:
+        """
+        상품 필터링용 카테고리 트리 반환.
+
+        구조:
+        - 노트북: LG그램, 삼성 갤럭시북, 게이밍 노트북, Apple 맥북, 울트라북, 일반 노트북
+        - 데스크탑: 브랜드PC, 미니PC, 게이밍PC, 올인원PC, 조립PC
+        - PC부품: CPU, 그래픽카드, SSD, RAM, 메인보드
+        - 모니터: 4K 모니터, 게이밍 모니터, 일반 모니터
+        - 주변기기: 키보드, 마우스
+        """
+        # 대분류별 허용할 소분류 카테고리 이름 목록
+        filter_structure = {
+            '노트북': ['LG 그램', '삼성 갤럭시북', '게이밍 노트북', 'Apple 맥북', '울트라북', '일반 노트북'],
+            '데스크탑': ['브랜드PC', '미니PC', '게이밍PC', '올인원PC', '조립PC'],
+            'PC부품': ['CPU', '그래픽카드', 'SSD', 'RAM', '메인보드'],
+            '모니터': ['4K 모니터', '게이밍 모니터', '일반 모니터'],
+            '주변기기': ['키보드', '마우스'],
+        }
+
+        result = []
+        for main_name, sub_names in filter_structure.items():
+            category = CategoryModel.objects.filter(
+                name__icontains=main_name,
+                deleted_at__isnull=True
+            ).order_by('level').first()
+
+            if category:
+                result.append(self._build_filter_tree_node(category, sub_names))
+
+        return result
+
+    def _build_filter_tree_node(self, category: CategoryModel, allowed_children: List[str] = None) -> Dict[str, Any]:
+        """필터용 카테고리 트리 노드 구성 (지정된 하위 카테고리만 포함)."""
+        children = CategoryModel.objects.filter(
+            parent=category,
+            deleted_at__isnull=True
+        ).order_by('name')
+
+        # 허용된 카테고리만 필터링
+        if allowed_children:
+            filtered_children = [
+                {'id': child.id, 'name': child.name}
+                for child in children
+                if child.name in allowed_children
+            ]
+            # 지정된 순서대로 정렬
+            order_map = {name: idx for idx, name in enumerate(allowed_children)}
+            filtered_children.sort(key=lambda x: order_map.get(x['name'], 999))
+        else:
+            filtered_children = [
+                {'id': child.id, 'name': child.name}
+                for child in children
+            ]
+
+        return {
+            'id': category.id,
+            'name': category.name,
+            'children': filtered_children
+        }
