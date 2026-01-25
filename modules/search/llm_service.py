@@ -7,7 +7,6 @@ intent extraction and recommendation reason generation.
 import json
 import logging
 import re
-import difflib
 import concurrent.futures
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -20,6 +19,7 @@ from modules.categories.models import CategoryModel
 from shared.ai_clients import get_openai_client, get_gemini_client
 from .prompts import (
     INTENT_EXTRACTION_PROMPT,
+    ANALYSIS_MESSAGE_PROMPT,
     COMBINED_RECOMMENDATION_PROMPT,
 )
 
@@ -33,8 +33,6 @@ class LLMRecommendationService:
     KEYWORD_WEIGHT = 0.3
     TOP_K = 5
     SEARCH_LIMIT = 50  # 각 검색에서 가져올 후보 수 (20 → 50)
-
-    _category_cache = []  # Class-level cache for categories
 
     def __init__(self):
         self.openai_client = get_openai_client()
@@ -53,8 +51,19 @@ class LLMRecommendationService:
         # 1. 의도 추출 (Gemini Pro)
         intent = self._extract_intent(user_query)
 
-        # 1.5 카테고리 매핑 (In-Memory Cache)
-        category_id = self._find_matching_category(intent.get('product_category'))
+        # 1.5 카테고리 매핑 및 필터링 설정 (Shopping Research 방식 적용)
+        category_id = None
+        llm_category_name = intent.get('product_category')
+        if llm_category_name and llm_category_name != '기타':
+            # TrigramSimilarity를 사용하여 DB에서 가장 유사한 카테고리 검색
+            best_match = CategoryModel.objects.annotate(
+                similarity=TrigramSimilarity('name', llm_category_name)
+            ).filter(similarity__gt=0.3).order_by('-similarity').first()
+
+            if best_match:
+                category_id = best_match.id
+                logger.info(f"LLM category '{llm_category_name}' mapped to DB category '{best_match.name}' (ID: {category_id})")
+
         min_price = intent.get('min_price')
         max_price = intent.get('max_price')
 
@@ -82,17 +91,29 @@ class LLMRecommendationService:
                     existing_ids.add(result['product'].danawa_product_id)
 
         # 5. LLM 통합 추천 (재랭킹 + 추천사유 + 리뷰요약) - 속도 개선
-        candidate_products = fused_results[:10]  # 상위 10개 후보 (기존 20개에서 축소)
+        candidate_products = fused_results[:20]  # 상위 20개 후보
         
-        # LLM 호출 (재랭킹)
-        recommendation_results = self._rerank_and_analyze(
-            user_query=user_query,
-            intent=intent,
-            candidates=candidate_products
-        )
+        # 분석 메시지용 예상 상품 수 (재랭킹 전이므로 후보 수와 TOP_K 중 작은 값 사용)
+        estimated_count = min(len(candidate_products), self.TOP_K)
         
-        # 분석 메시지는 의도 추출 단계에서 가져온 것을 사용
-        analysis_message = intent.get('analysis_message', f"'{user_query}'에 대한 추천 결과입니다.")
+        # LLM 호출 병렬화 (재랭킹/분석 + 메시지 생성)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_rerank = executor.submit(
+                self._rerank_and_analyze,
+                user_query=user_query,
+                intent=intent,
+                candidates=candidate_products
+            )
+            future_analysis = executor.submit(
+                self._generate_analysis_message,
+                user_query=user_query,
+                user_needs=intent['user_needs'],
+                priorities=intent['priorities'],
+                product_count=estimated_count
+            )
+            
+            recommendation_results = future_rerank.result()
+            analysis_message = future_analysis.result()
 
         # 7. 최종 응답 구성
         recommended_products = []
@@ -136,42 +157,6 @@ class LLMRecommendationService:
             ids.extend(self._get_descendant_category_ids(child.id))
         return ids
 
-    def _refresh_category_cache(self):
-        """Cache all categories in memory."""
-        if not self._category_cache:
-            try:
-                categories = CategoryModel.objects.filter(deleted_at__isnull=True).values('id', 'name')
-                self._category_cache = list(categories)
-                logger.info(f"Cached {len(self._category_cache)} categories in memory.")
-            except Exception as e:
-                logger.error(f"Failed to cache categories: {e}")
-
-    def _find_matching_category(self, llm_category_name: str) -> Optional[int]:
-        """Find matching category ID using in-memory fuzzy matching."""
-        if not self._category_cache:
-            self._refresh_category_cache()
-        
-        if not llm_category_name or llm_category_name == '기타':
-            return None
-
-        # Exact match first
-        for cat in self._category_cache:
-            if cat['name'] == llm_category_name:
-                return cat['id']
-        
-        # Fuzzy match
-        category_names = [cat['name'] for cat in self._category_cache]
-        matches = difflib.get_close_matches(llm_category_name, category_names, n=1, cutoff=0.4)
-        
-        if matches:
-            matched_name = matches[0]
-            for cat in self._category_cache:
-                if cat['name'] == matched_name:
-                    logger.info(f"LLM category '{llm_category_name}' mapped to DB category '{matched_name}' (ID: {cat['id']})")
-                    return cat['id']
-        
-        return None
-
     def _extract_intent(self, user_query: str) -> Dict[str, Any]:
         """
         Gemini Pro를 사용하여 사용자 쿼리에서 의도 추출.
@@ -205,8 +190,7 @@ class LLMRecommendationService:
                 'search_query': intent.get('search_query', user_query),
                 'min_price': intent.get('min_price'),
                 'max_price': intent.get('max_price'),
-                'user_needs': intent.get('user_needs', user_query),
-                'analysis_message': intent.get('analysis_message', f"'{user_query}'에 대한 분석 결과입니다.")
+                'user_needs': intent.get('user_needs', user_query)
             }
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"Intent extraction failed: {e}. Using fallback.")
@@ -223,8 +207,7 @@ class LLMRecommendationService:
                 'search_query': user_query,
                 'min_price': None,
                 'max_price': None,
-                'user_needs': user_query,
-                'analysis_message': f"'{user_query}'에 대한 추천 결과입니다."
+                'user_needs': user_query
             }
 
     def _vector_search(
@@ -545,6 +528,40 @@ class LLMRecommendationService:
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"LLM reranking/analysis failed: {e}. Returning empty list.")
             return []
+
+    def _generate_analysis_message(
+        self,
+        user_query: str,
+        user_needs: str,
+        priorities: Dict[str, int],
+        product_count: int
+    ) -> str:
+        """
+        Gemini Pro를 사용하여 분석 메시지 생성.
+        """
+        # 우선순위 문자열 생성
+        priority_items = []
+        for key, value in priorities.items():
+            if value >= 7:
+                priority_items.append(f"{key}(높음)")
+            elif value >= 4:
+                priority_items.append(f"{key}(중간)")
+
+        priorities_str = ', '.join(priority_items) if priority_items else '균형잡힌 스펙'
+
+        prompt = ANALYSIS_MESSAGE_PROMPT.format(
+            user_query=user_query,
+            user_needs=user_needs,
+            priorities=priorities_str,
+            product_count=product_count
+        )
+
+        try:
+            response = self.gemini_client.generate_content(prompt)
+            return response.strip()
+        except Exception as e:
+            logger.warning(f"Analysis message generation failed: {e}")
+            return f"'{user_query}'에 맞는 노트북 {product_count}개를 추천해드려요."
 
     def _extract_display_specs(self, detail_spec: Dict[str, Any]) -> Dict[str, Optional[str]]:
         """
