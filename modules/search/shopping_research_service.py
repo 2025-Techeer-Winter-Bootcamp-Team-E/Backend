@@ -226,22 +226,36 @@ class ShoppingResearchService:
             min_price, max_price = None, None
 
         # Perform hybrid search with strict filters
-        logger.info(f"Attempting search with strict filters: category_id={category_id}, price=[{min_price}-{max_price}]")
+        logger.info(f"Attempting search with strict filters: category_id={category_id}, price=[{min_price}-{max_price}], query='{intent['search_query']}'")
         vector_results = self._vector_search(intent['search_query'], category_id, min_price, max_price) # Only vector search
+        logger.info(f"Vector search 결과: {len(vector_results)}개 상품 발견")
+        
         fused_results = self._fuse_results(vector_results) # Pass only vector results
+        logger.info(f"Fused results: {len(fused_results)}개")
 
-        # Filter by minimum similarity (90%+)
+        # Filter by minimum similarity (60%+)
         high_similarity_results = [
             r for r in fused_results if r['combined_score'] >= self.MIN_SIMILARITY
         ]
+        logger.info(f"유사도 {self.MIN_SIMILARITY*100}% 이상 상품: {len(high_similarity_results)}개")
 
         # If not enough high-similarity results, use top results
         if len(high_similarity_results) < self.TOP_K:
-            logger.info(f"Only {len(high_similarity_results)} products with {self.MIN_SIMILARITY*100}%+ similarity. Using top results.")
-            high_similarity_results = fused_results[:self.TOP_K]
+            logger.info(f"Only {len(high_similarity_results)} products with {self.MIN_SIMILARITY*100}%+ similarity. Using top {self.TOP_K} results regardless of similarity.")
+            high_similarity_results = fused_results[:self.TOP_K] if fused_results else []
 
         # Get top K products
         top_products = high_similarity_results[:self.TOP_K]
+        
+        logger.info(f"최종 선택된 상품 수: {len(top_products)}개 (요청: {self.TOP_K}개)")
+
+        # 상품이 없으면 빈 배열 반환
+        if not top_products:
+            logger.warning(f"검색 결과 없음 - query: '{user_query}', category_id: {category_id}, price_range: [{min_price}-{max_price}]")
+            return {
+                "user_query": user_query,
+                "product": []
+            }
 
         # Batch generate reasons and summaries (API 호출 최적화: 1회 호출)
         batch_analysis = self._batch_analyze_products(
@@ -264,6 +278,7 @@ class ShoppingResearchService:
             )
             products.append(product_info)
 
+        logger.info(f"최종 반환 상품 수: {len(products)}개")
         return {
             "user_query": user_query,
             "product": products
@@ -291,6 +306,10 @@ class ShoppingResearchService:
 
         try:
             response = self.gemini_client.generate_content(prompt)
+            
+            # 응답이 None이거나 빈 문자열인 경우 처리
+            if not response:
+                raise ValueError("Gemini API가 빈 응답을 반환했습니다.")
 
             json_match = re.search(r'\{[\s\S]*\}', response)
             if json_match:
@@ -342,7 +361,12 @@ class ShoppingResearchService:
         max_price: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Perform HNSW vector search."""
-        query_embedding = self.openai_client.create_embedding(search_query)
+        try:
+            query_embedding = self.openai_client.create_embedding(search_query)
+        except Exception as e:
+            logger.error(f"OpenAI embedding 생성 실패: {str(e)}")
+            # Embedding 생성 실패 시 빈 결과 반환
+            return []
 
         queryset = ProductModel.objects.filter(
             deleted_at__isnull=True,
@@ -457,6 +481,11 @@ class ShoppingResearchService:
 
         try:
             response = self.gemini_client.generate_content(prompt)
+            
+            # 응답이 None이거나 빈 문자열인 경우 처리
+            if not response:
+                raise ValueError("Gemini API가 빈 응답을 반환했습니다.")
+            
             json_match = re.search(r'\{[\s\S]*\}', response)
             result = json.loads(json_match.group()) if json_match else json.loads(response)
             analysis_map = {str(item.get('product_code')): item for item in result.get('results', [])}

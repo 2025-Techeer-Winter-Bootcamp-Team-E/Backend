@@ -1,11 +1,16 @@
 """
 Search API views.
 """
+import logging
+import traceback
+from django.conf import settings
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse # OpenApiResponse 추가
+
+logger = logging.getLogger(__name__)
 
 from .services import SearchService, RecentViewProductService
 from .llm_service import LLMRecommendationService
@@ -337,9 +342,33 @@ class ShoppingResearchView(APIView):
                 "data": result
             }, status=status.HTTP_200_OK)
 
+        except ValueError as e:
+            # API 키 관련 에러는 400 Bad Request로 반환
+            error_msg = str(e)
+            logger.error(f"쇼핑 리서치 API 키 오류: {error_msg}")
+            return Response({
+                "status": 400,
+                "message": error_msg,
+                "error": error_msg
+            }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            error_traceback = traceback.format_exc()
+            logger.error(f"쇼핑 리서치 추천 중 오류 발생: {str(e)}")
+            logger.error(f"Traceback: {error_traceback}")
+            logger.error(f"Request data: search_id={search_id}, user_query={user_query}, survey_contents={survey_contents}")
+            
+            # OpenAI API 키 오류인 경우 특별 처리
+            error_str = str(e)
+            if 'API key' in error_str or 'invalid_api_key' in error_str or 'Incorrect API key' in error_str:
+                return Response({
+                    "status": 400,
+                    "message": "OpenAI API 키가 올바르지 않습니다. 서버 관리자에게 문의하세요.",
+                    "error": error_str
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
             return Response({
                 "status": 500,
                 "message": "서버 내부 오류가 발생했습니다.",
-                "error": str(e)
+                "error": str(e),
+                "detail": error_traceback if settings.DEBUG else None
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
