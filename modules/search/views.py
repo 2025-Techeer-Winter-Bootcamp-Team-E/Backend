@@ -204,7 +204,7 @@ class LLMRecommendationView(APIView):
     자연어 쿼리를 분석하여 의도(Intent)를 추출하고,
     HNSW(벡터) + GIN(키워드) 하이브리드 검색으로 최적의 상품 5개를 추천합니다.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     llm_service = LLMRecommendationService()
     search_service = SearchService()
 
