@@ -4,7 +4,7 @@ import re
 import concurrent.futures
 from typing import List, Dict, Any, Optional
 
-from django.db.models import F, Q
+from django.db.models import F
 from django.contrib.postgres.search import TrigramSimilarity
 from pgvector.django import L2Distance
 
@@ -16,157 +16,178 @@ from .prompts import INTENT_EXTRACTION_PROMPT, COMBINED_RECOMMENDATION_PROMPT
 logger = logging.getLogger(__name__)
 
 class LLMRecommendationService:
-    """Pro의 지능을 쓰되, 카테고리 이탈과 결과 증발을 원천 봉쇄한 코드"""
+    """
+    ShoppingResearchService의 강력한 카테고리 필터링 로직을 이식한 완성형 서비스
+    - TrigramSimilarity를 이용한 오차 없는 카테고리 ID 매핑
+    - 재귀적 하위 카테고리 수집을 통한 계층 검색 지원
+    - 카테고리 불일치 시 검색 원천 차단 (Safety Lock)
+    """
 
     TOP_K = 5
+    MIN_CAT_SIMILARITY = 0.3  # 카테고리 매칭 최소 유사도
 
     def __init__(self):
         self.openai_client = get_openai_client()
         self.gemini_client = get_gemini_client()
-        # 카테고리 목록 메모리 캐싱 (ID 매핑용)
-        self._categories = list(CategoryModel.objects.filter(deleted_at__isnull=True).values('id', 'name'))
+        
+        # 프롬프트 힌트용 카테고리 명칭 로드
+        cat_names = CategoryModel.objects.filter(deleted_at__isnull=True).values_list('name', flat=True)
+        self._category_list_str = ", ".join(cat_names)
 
     def get_recommendations(self, user_query: str) -> Dict[str, Any]:
-        # 1. 의도 추출 및 분석 메시지 (호출 통합으로 10초 절감)
+        # 1. 의도 추출 및 JSON 파싱 (마크다운 제거 로직 포함)
         intent = self._extract_intent_pro(user_query)
         
-        # 2. 엄격한 카테고리 매핑 (CPU 요청 시 모니터암 차단 핵심 로직)
-        category_name = intent.get('product_category', '상품')
-        category_id = self._find_strict_category(category_name)
+        llm_category_name = intent.get('product_category', '기타').strip()
+        category_id = None
         
-        # 3. 병렬 DB 검색 (L2Distance + Category Hard-filter)
+        # 2. [강력 매핑] TrigramSimilarity를 사용하여 DB ID 확보
+        if llm_category_name and llm_category_name != '기타':
+            best_match = CategoryModel.objects.annotate(
+                similarity=TrigramSimilarity('name', llm_category_name)
+            ).filter(similarity__gt=self.MIN_CAT_SIMILARITY).order_by('-similarity').first() #
+
+            if best_match:
+                category_id = best_match.id
+                logger.info(f"LLM Category '{llm_category_name}' mapped to DB '{best_match.name}' (ID: {category_id})")
+            else:
+                # 카테고리 특정에 실패하면 엉뚱한 결과 노출 방지를 위해 즉시 반환
+                logger.warning(f"Category mismatch: '{llm_category_name}' not found in DB.")
+                return {
+                    "analysis_message": f"죄송합니다. '{llm_category_name}' 카테고리 정보를 찾을 수 없습니다.",
+                    "recommended_products": []
+                }
+
+        # 3. [계층 검색] 하위 카테고리 ID 리스트 재귀적 수집
+        target_category_ids = self._get_descendant_category_ids(category_id) if category_id else [] #
+
+        # 4. 병렬 DB 검색 (강력한 category_id__in 필터 적용)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            f_vec = executor.submit(self._vector_search, intent.get('search_query', user_query), category_id)
-            f_key = executor.submit(self._keyword_search, intent.get('keywords', [user_query]), category_id)
+            f_vec = executor.submit(self._vector_search, intent.get('search_query', user_query), target_category_ids)
+            f_key = executor.submit(self._keyword_search, intent.get('keywords', [user_query]), target_category_ids)
             vector_results, keyword_results = f_vec.result(), f_key.result()
 
-        # 4. 하이브리드 결합 (상위 8개 후보 선정)
+        # 5. 하이브리드 결합
         fused_results = self._fuse_results(vector_results, keyword_results)[:8]
 
         if not fused_results:
-            return {"analysis_message": f"'{category_name}' 카테고리에서 상품을 찾지 못했습니다.", "recommended_products": []}
+            return {
+                "analysis_message": f"'{llm_category_name}' 카테고리에서 조건에 맞는 상품을 찾지 못했습니다.",
+                "recommended_products": []
+            }
 
-        # 5. 재랭킹 및 결과 구성 (실패 시에도 상품 노출 보장)
+        # 6. 재랭킹 및 최종 조립
         final_products = self._rerank_with_fallback(user_query, intent, fused_results)
 
         return {
-            "analysis_message": intent.get('analysis_message', f"{category_name} 추천 결과입니다."),
+            "analysis_message": intent.get('analysis_message', f"{llm_category_name} 추천 결과입니다."),
             "recommended_products": final_products
         }
 
+    def _get_descendant_category_ids(self, category_id: int) -> List[int]:
+        """[ShoppingResearchService 이식] 자식 카테고리 ID를 재귀적으로 모두 수집"""
+        ids = [category_id]
+        children = CategoryModel.objects.filter(parent_id=category_id, deleted_at__isnull=True)
+        for child in children:
+            ids.extend(self._get_descendant_category_ids(child.id)) #
+        return ids
+
     def _extract_intent_pro(self, user_query: str) -> Dict[str, Any]:
-        """Pro 모델을 사용하여 의도와 메시지 동시 추출"""
-        prompt = f"{INTENT_EXTRACTION_PROMPT}\n\n필수 필드: 'analysis_message' (사용자 니즈 공감 메시지 1-2문장)"
-        
-        # 기본값 (KeyError 방어)
-        res = {"product_category": "상품", "search_query": user_query, "keywords": [user_query], "analysis_message": "상품을 분석 중입니다."}
+        """JSON 추출 및 정규화 로직 강화"""
+        prompt = INTENT_EXTRACTION_PROMPT.format(category_list=self._category_list_str, user_query=user_query)
+        res = {"product_category": "기타", "search_query": user_query, "analysis_message": "상품을 분석 중입니다."}
         try:
-            response = self.gemini_client.generate_content(prompt.format(user_query=user_query))
-            match = re.search(r'\{[\s\S]*\}', response.text)
+            resp = self.gemini_client.generate_content(prompt)
+            # 마크다운 코드 블록 제거
+            text = re.sub(r'```json\s*|```', '', resp.text)
+            match = re.search(r'\{[\s\S]*\}', text)
             if match:
                 res.update(json.loads(match.group()))
             return res
-        except:
+        except Exception as e:
+            logger.error(f"Intent extraction error: {e}")
             return res
 
-    def _find_strict_category(self, name: str) -> Optional[int]:
-        """'CPU'가 '모니터암'에 낚이지 않도록 하는 엄격 매칭"""
-        if not name or name == '기타': return None
-        # 완전 일치 우선
-        for c in self._categories:
-            if c['name'].strip().lower() == name.strip().lower():
-                return c['id']
-        # 포함 일치 (오답 방지를 위해 카테고리명이 너무 길지 않은 경우만)
-        for c in self._categories:
-            if name in c['name'] and len(c['name']) < len(name) + 3:
-                return c['id']
-        return None
-
-    def _vector_search(self, query, category_id):
-        """L2Distance 기반 검색 + 카테고리 감옥 필터"""
+    def _vector_search(self, query, category_ids):
+        """벡터 검색 시 카테고리 필터 강제 적용"""
         embedding = self.openai_client.create_embedding(query)
         qs = ProductModel.objects.filter(deleted_at__isnull=True, detail_spec_vector__isnull=False)
         
-        # 🔥 여기서 카테고리를 꽉 잡아야 엉뚱한 상품이 안 나옵니다.
-        if category_id:
-            qs = qs.filter(category_id=category_id)
+        # [Safety Lock] 카테고리 ID 리스트가 있으면 강력하게 필터링
+        if category_ids:
+            qs = qs.filter(category_id__in=category_ids) #
+        elif any(k in query for k in ["CPU", "노트북", "그래픽카드"]):
+            # 카테고리가 안 잡혔는데 주요 하드웨어를 물어본 경우, 사고 방지를 위해 검색 안함
+            return []
 
         products = qs.exclude(product_status__in=['단종', '판매중지', '품절']).annotate(
             distance=L2Distance('detail_spec_vector', embedding)
         ).order_by('distance')[:20]
         
-        products_list = list(products)
-        mall_map = self._get_mall_map([p.id for p in products_list])
-        return [{'product': p, 'mall_info': mall_map.get(p.id), 'score': max(0, 1-(p.distance/2))} for p in products_list]
+        p_list = list(products)
+        mall_map = self._get_mall_map([p.id for p in p_list])
+        return [{'product': p, 'mall_info': mall_map.get(p.id), 'score': max(0, 1-(p.distance/2))} for p in p_list]
 
     def _rerank_with_fallback(self, user_query, intent, fused_results):
-        """LLM이 사고를 쳐도 DB 결과 5개는 무조건 보여주는 보장 로직"""
-        # LLM에게 줄 상품 리스트 문자열화
-        product_list_str = "\n".join([
-            f"- 코드: {r['product'].danawa_product_id} | 품명: {r['product'].name}" for r in fused_results
-        ])
+        """상세 스펙을 포함한 재랭킹 및 추천 사유 생성"""
+        candidates = []
+        for item in fused_results:
+            p = item['product']
+            spec = self._parse_specs_to_string(p.detail_spec)
+            candidates.append(f"- ID:{p.danawa_product_id} | 품명:{p.name} | 스펙:{spec}")
         
         prompt = COMBINED_RECOMMENDATION_PROMPT.format(
             user_query=user_query,
-            product_category=intent.get('product_category', '상품'),
             user_needs=intent.get('user_needs', user_query),
-            product_list=product_list_str
+            product_category=intent.get('product_category', '상품'),
+            product_list="\n".join(candidates)
         )
 
         reason_map = {}
-        selected_codes = []
         try:
             resp = self.gemini_client.generate_content(prompt)
             data = json.loads(re.search(r'\{[\s\S]*\}', resp.text).group())
             for r in data.get('results', []):
-                code = str(r.get('product_code'))
-                reason_map[code] = r.get('recommendation_reason')
-                selected_codes.append(code)
+                reason_map[str(r.get('product_code'))] = r.get('recommendation_reason')
         except:
-            logger.error("LL Reranking failed, falling back to DB ranking.")
+            logger.warning("LLM Reranking failed, using fallback reason.")
 
-        # 최종 리스트 조립 (LLM 선택 우선, 없으면 DB 검색 상위 5개 강제 채움)
-        final_list = []
-        target_items = []
-        
-        if selected_codes:
-            code_map = {str(f['product'].danawa_product_id): f for f in fused_results}
-            for code in selected_codes:
-                if code in code_map: target_items.append(code_map[code])
-        
-        # LLM이 선택을 못했거나 형식이 틀렸으면 DB 상위 5개로 대체
-        if not target_items:
-            target_items = fused_results[:self.TOP_K]
-
-        for item in target_items[:self.TOP_K]:
+        final = []
+        for item in fused_results[:self.TOP_K]:
             p = item['product']
-            final_list.append({
+            p_id = str(p.danawa_product_id)
+            final.append({
                 'product_code': p.danawa_product_id,
                 'name': p.name,
                 'brand': p.brand,
                 'price': p.lowest_price,
                 'thumbnail_url': item['mall_info'].representative_image_url if item['mall_info'] else None,
-                'recommendation_reason': reason_map.get(str(p.danawa_product_id), "사용자의 요구 사양에 가장 부합하는 고성능 모델입니다."),
-                'specs': self._extract_display_specs(p.detail_spec),
+                'recommendation_reason': reason_map.get(p_id, self._generate_fallback_reason(p)),
+                'specs': p.detail_spec.get('spec', {}) if isinstance(p.detail_spec, dict) else {},
                 'review_count': p.review_count,
                 'review_rating': p.review_rating,
             })
-        return final_list
+        return final
 
-    # (이하 _keyword_search, _fuse_results, _get_mall_map, _extract_display_specs는 기존 로직 유지)
-    def _get_mall_map(self, ids):
-        mall_infos = MallInformationModel.objects.filter(product_id__in=ids, deleted_at__isnull=True).order_by('product_id', '-created_at').distinct('product_id')
-        return {mi.product_id: mi for mi in mall_infos}
+    def _parse_specs_to_string(self, detail_spec):
+        """ 스펙 데이터를 텍스트 요약"""
+        if not detail_spec: return "정보 없음"
+        if isinstance(detail_spec, dict) and 'spec_summary' in detail_spec:
+            return " | ".join(map(str, detail_spec['spec_summary']))
+        return str(detail_spec)[:150]
 
-    def _keyword_search(self, keywords, category_id):
+    def _generate_fallback_reason(self, p):
+        return f"{p.brand}의 신뢰도 높은 모델로, 사용자의 요구 성능을 충실히 만족하는 제품입니다."
+
+    def _keyword_search(self, keywords, category_ids):
         if not keywords: return []
         qs = ProductModel.objects.filter(deleted_at__isnull=True)
-        if category_id:
-            qs = qs.filter(category_id=category_id)
+        if category_ids:
+            qs = qs.filter(category_id__in=category_ids) #
         qs = qs.annotate(sim=TrigramSimilarity('name', ' '.join(keywords))).filter(sim__gt=0.05).order_by('-sim')[:20]
-        products = list(qs)
-        mall_map = self._get_mall_map([p.id for p in products])
-        return [{'product': p, 'mall_info': mall_map.get(p.id), 'score': float(p.sim)} for p in products]
+        p_list = list(qs)
+        mall_map = self._get_mall_map([p.id for p in p_list])
+        return [{'product': p, 'mall_info': mall_map.get(p.id), 'score': float(p.sim)} for p in p_list]
 
     def _fuse_results(self, vec, key):
         res = {i['product'].danawa_product_id: i for i in vec}
@@ -176,5 +197,6 @@ class LLMRecommendationService:
             else: res[pid] = i
         return sorted(res.values(), key=lambda x: x['score'], reverse=True)
 
-    def _extract_display_specs(self, detail_spec):
-        return {"specs": "상세 스펙 참조"}
+    def _get_mall_map(self, ids):
+        mall_infos = MallInformationModel.objects.filter(product_id__in=ids, deleted_at__isnull=True).order_by('product_id', '-created_at').distinct('product_id')
+        return {mi.product_id: mi for mi in mall_infos}
