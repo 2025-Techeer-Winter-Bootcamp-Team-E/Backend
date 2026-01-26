@@ -35,31 +35,47 @@ class LLMRecommendationService:
         self._category_list_str = ", ".join(cat_names)
 
     def get_recommendations(self, user_query: str) -> Dict[str, Any]:
-        # 1. 의도 추출 및 JSON 파싱 (마크다운 제거 로직 포함)
+        # 1. 의도 추출 실행
         intent = self._extract_intent_pro(user_query)
         
         llm_category_name = intent.get('product_category', '기타').strip()
         category_id = None
         
-        # 2. [강력 매핑] TrigramSimilarity를 사용하여 DB ID 확보
+        # [LOG] LLM이 분석한 의도 출력
+        logger.info(f"==== [STEP 1] LLM Intent Extraction ====")
+        logger.info(f"User Query: {user_query}")
+        logger.info(f"LLM Category: {llm_category_name}")
+        logger.info(f"LLM Search Query: {intent.get('search_query')}")
+        
+        # 2. 카테고리 매핑 로직 로그
+        logger.info(f"==== [STEP 2] Category Mapping ====")
         if llm_category_name and llm_category_name != '기타':
-            best_match = CategoryModel.objects.annotate(
-                similarity=TrigramSimilarity('name', llm_category_name)
-            ).filter(similarity__gt=self.MIN_CAT_SIMILARITY).order_by('-similarity').first() #
-
-            if best_match:
-                category_id = best_match.id
-                logger.info(f"LLM Category '{llm_category_name}' mapped to DB '{best_match.name}' (ID: {category_id})")
+            # 완전 일치 확인
+            exact_match = CategoryModel.objects.filter(
+                name=llm_category_name, 
+                deleted_at__isnull=True
+            ).first()
+            
+            if exact_match:
+                category_id = exact_match.id
+                logger.info(f"Result: [EXACT MATCH] '{llm_category_name}' -> ID {category_id}")
             else:
-                # 카테고리 특정에 실패하면 엉뚱한 결과 노출 방지를 위해 즉시 반환
-                logger.warning(f"Category mismatch: '{llm_category_name}' not found in DB.")
-                return {
-                    "analysis_message": f"죄송합니다. '{llm_category_name}' 카테고리 정보를 찾을 수 없습니다.",
-                    "recommended_products": []
-                }
+                # Trigram 유사도 확인
+                best_match = CategoryModel.objects.annotate(
+                    similarity=TrigramSimilarity('name', llm_category_name)
+                ).filter(similarity__gt=self.MIN_CAT_SIMILARITY).order_by('-similarity').first()
 
-        # 3. [계층 검색] 하위 카테고리 ID 리스트 재귀적 수집
-        target_category_ids = self._get_descendant_category_ids(category_id) if category_id else [] #
+                if best_match:
+                    category_id = best_match.id
+                    logger.info(f"Result: [TRIGRAM MATCH] '{llm_category_name}' -> DB '{best_match.name}' (Sim: {best_match.similarity:.4f}, ID: {category_id})")
+                else:
+                    logger.warning(f"Result: [MATCH FAILED] No category found for '{llm_category_name}'")
+
+        # 3. 최종 검색 범위 로그
+        target_category_ids = self._get_descendant_category_ids(category_id) if category_id else []
+        logger.info(f"Final Category IDs for Filter: {target_category_ids}")
+        
+        # ... (이후 검색 로직)
 
         # 4. 병렬 DB 검색 (강력한 category_id__in 필터 적용)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -93,20 +109,31 @@ class LLMRecommendationService:
         return ids
 
     def _extract_intent_pro(self, user_query: str) -> Dict[str, Any]:
-        """JSON 추출 및 정규화 로직 강화"""
-        prompt = INTENT_EXTRACTION_PROMPT.format(category_list=self._category_list_str, user_query=user_query)
-        res = {"product_category": "기타", "search_query": user_query, "analysis_message": "상품을 분석 중입니다."}
+        """LLM의 날것(Raw) 그대로의 답변을 로깅합니다."""
+        full_prompt = INTENT_EXTRACTION_PROMPT.format(
+            category_list=self._category_list_str, 
+            user_query=user_query
+        )
+        
         try:
-            resp = self.gemini_client.generate_content(prompt)
-            # 마크다운 코드 블록 제거
+            resp = self.gemini_client.generate_content(full_prompt)
+            
+            # [LOG] LLM의 Raw Response 출력 (파싱 전)
+            logger.debug(f"==== [DEBUG] LLM Raw Response ====")
+            logger.debug(resp.text)
+            
             text = re.sub(r'```json\s*|```', '', resp.text)
             match = re.search(r'\{[\s\S]*\}', text)
+            
             if match:
-                res.update(json.loads(match.group()))
-            return res
+                res = json.loads(match.group())
+                return res
+            else:
+                logger.error("Failed to find JSON block in LLM response")
+                return {"product_category": "기타"}
         except Exception as e:
-            logger.error(f"Intent extraction error: {e}")
-            return res
+            logger.error(f"Intent Extraction Error: {str(e)}")
+            return {"product_category": "기타"}
 
     def _vector_search(self, query, category_ids):
         """벡터 검색 시 카테고리 필터 강제 적용"""
