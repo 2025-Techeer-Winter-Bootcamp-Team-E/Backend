@@ -113,7 +113,7 @@ class CartItemListCreateView(APIView):
                     'cart_item_id': item.id,
                     'product_code': product.danawa_product_id,
                     'product_name': product.name,
-                    'product_resentative_image_url': representative_image_url,
+                    'product_representative_image_url': representative_image_url,
                     'quantity': item.quantity,
                     'price': price,
                     'total_price': total_price,
