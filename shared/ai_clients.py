@@ -81,7 +81,7 @@ class GeminiClient:
         if self._client is None:
             import google.generativeai as genai
             genai.configure(api_key=settings.GEMINI_API_KEY)
-            self._client = genai.GenerativeModel('gemini-2.5-pro')
+            self._client = genai.GenerativeModel('gemini-2.0-flash')
         return self._client
 
     def generate_content(self, prompt: str) -> str:
