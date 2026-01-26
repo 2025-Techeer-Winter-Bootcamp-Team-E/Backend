@@ -16,7 +16,7 @@ from django.contrib.postgres.search import TrigramSimilarity
 from django.db.models.functions import Cast
 from django.db.models import TextField
 from pgvector.django import CosineDistance
-
+from concurrent.futures import ThreadPoolExecutor
 from modules.products.models import ProductModel, MallInformationModel
 from modules.categories.models import CategoryModel
 from shared.ai_clients import get_openai_client, get_gemini_client
@@ -117,6 +117,7 @@ class ShoppingResearchService:
             }
 
         except (json.JSONDecodeError, Exception) as e:
+            logger.error(f"❌ 질문 생성 실패 원인: {str(e)}")
             logger.warning(f"Question generation failed: {e}. Using default questions.")
             return {
                 "search_id": search_id,
@@ -257,32 +258,39 @@ class ShoppingResearchService:
                 "product": []
             }
 
-        # Batch generate reasons and summaries (API 호출 최적화: 1회 호출)
-        batch_analysis = self._batch_analyze_products(
+        # 3. 모든 상품의 가격 리스트 (최저가 여부 확인용)
+        all_prices = [p['product'].lowest_price for p in top_products]
+
+            # 1. Gemini에게 5개 상품 정보를 한꺼번에 던져서 분석 결과를 미리 다 받아옵니다.
+        analysis_map = self._batch_analyze_products(
             user_query=user_query,
             user_needs=intent['user_needs'],
             products=top_products
         )
 
-        # Build product recommendations
+        # 2. 분석된 결과를 루프를 돌며 하나씩 조립만 합니다. (이제 AI 호출 없음)
         products = []
-        for rank, product_data in enumerate(top_products, 1):
-            p_code = str(product_data['product'].danawa_product_id)
-            product_info = self._analyze_product(
-                product_data=product_data,
+        for rank, p_data in enumerate(top_products, 1):
+            p_code = str(p_data['product'].danawa_product_id)
+            # 일괄 분석 결과 맵에서 해당 상품의 데이터를 꺼내옵니다.
+            item_analysis = analysis_map.get(p_code)
+            
+            analyzed = self._analyze_product(
+                product_data=p_data,
                 user_query=user_query,
                 user_needs=intent['user_needs'],
                 rank=rank,
-                all_prices=[p['product'].lowest_price for p in top_products],
-                pre_analysis=batch_analysis.get(p_code)
+                all_prices=all_prices,
+                pre_analysis=item_analysis  # 미리 분석한 데이터를 넘겨줍니다.
             )
-            products.append(product_info)
+            products.append(analyzed)
 
-        logger.info(f"최종 반환 상품 수: {len(products)}개")
+            logger.info(f"최종 반환 상품 수: {len(products)}개")
         return {
             "user_query": user_query,
             "product": products
         }
+    
 
     def _analyze_survey(
         self,
@@ -445,8 +453,7 @@ class ShoppingResearchService:
         products: List[Dict[str, Any]]
     ) -> Dict[str, Dict[str, str]]:
         """
-        Batch generate recommendation reasons and review summaries for multiple products.
-        Returns a dict keyed by product_code containing 'recommendation_reason' and 'ai_review_summary'.
+        상품 스펙 필터링 없이 detail_spec 내의 spec_summary를 직접 보냄
         """
         if not products:
             return {}
@@ -454,15 +461,12 @@ class ShoppingResearchService:
         products_info_lines = []
         for p_data in products:
             product = p_data['product']
-            specs = self._extract_product_specs(product.detail_spec)
+
+            spec_summary_list = product.detail_spec.get('spec_summary', [])
+            #리스트 형태를 텍스르토 바꿈
+            specs_str = " / ".join(spec_summary_list) if spec_summary_list else "상세 정보 없음"
 
             # Format specs for prompt
-            spec_items = []
-            for key, value in specs.items():
-                if value:
-                    spec_items.append(f"{key}: {value}")
-            specs_str = ', '.join(spec_items) if spec_items else '정보 없음'
-
             products_info_lines.append(
                 f"- 상품코드: {product.danawa_product_id}\n"
                 f"  상품명: {product.name}\n"
@@ -510,26 +514,36 @@ class ShoppingResearchService:
         combined_score = product_data.get('combined_score', 0.0)
 
         # Extract specs
-        specs = self._extract_product_specs(product.detail_spec)
-
-        # Use pre-generated analysis if available, otherwise generate individually
+        spec_summary = product.detail_spec.get('spec_summary', [])
+        specs_str = " / ".join(spec_summary) if spec_summary else "상세 정보 없음"
+        specs_obj = {"summary": specs_str}
+        
+        # 2. 일괄 분석 결과(pre_analysis)가 있으면 사용하고, 없으면 직접 Gemini 호출(Fallback)
         if pre_analysis:
-            recommendation_reason = pre_analysis.get('recommendation_reason', '추천 사유를 생성하지 못했습니다.')
-            ai_review_summary = pre_analysis.get('ai_review_summary', '리뷰 요약을 생성하지 못했습니다.')
+            # _batch_analyze_products에서 이미 생성된 값을 가져옵니다.
+            recommendation_reason = pre_analysis.get('recommendation_reason')
+            ai_review_summary = pre_analysis.get('ai_review_summary')
+            
+            # 혹시 분석 결과가 누락되었을 경우를 대비한 최소한의 방어 로직(테스트 중 해당 문구 뜨면 에러임)
+            if not recommendation_reason:
+                recommendation_reason = f"{product.brand} {product.name}은(는) 요구사항에 적합한 추천 제품입니다."
+            if not ai_review_summary:
+                ai_review_summary = f"{product.name}은(는) 사용자분들께 좋은 평가를 받고 있습니다."
         else:
+            # 만약 일괄 분석 데이터가 전달되지 않았다면 기존처럼 개별 호출 수행
             recommendation_reason = self._generate_recommendation_reason(
                 user_query=user_query,
                 user_needs=user_needs,
                 product_name=product.name,
                 brand=product.brand,
                 price=product.lowest_price,
-                specs=specs
+                specs=specs_obj
             )
             ai_review_summary = self._generate_ai_review_summary(
                 product_name=product.name,
                 brand=product.brand,
                 price=product.lowest_price,
-                specs=specs,
+                specs=specs_obj,
                 user_needs=user_needs
             )
 
@@ -548,9 +562,7 @@ class ShoppingResearchService:
             "price": product.lowest_price,
             "performance_score": round(performance_score, 2),
             "product_specs": {
-                "cpu": specs.get('cpu'),
-                "ram": specs.get('ram'),
-                "weight": specs.get('weight')
+                "summary": specs_str  # 구조를 단순화하여 전체 스펙 요약을 전달
             },
             "ai_review_summary": ai_review_summary,
             "product_detail_url": mall_info.product_page_url if mall_info else None,
@@ -559,7 +571,8 @@ class ShoppingResearchService:
                 "is_lowest_price": is_lowest_price
             }
         }
-
+    #스펙 추출 기능 메서드 삭제 => 다양한 카테고리의 상품 포괄 못하기 때문.
+    ''' 
     def _extract_product_specs(self, detail_spec: Dict[str, Any]) -> Dict[str, Optional[str]]:
         """Extract display specs from product detail_spec."""
         specs = {
@@ -619,7 +632,7 @@ class ShoppingResearchService:
                     specs['storage'] = str(value)
 
         return specs
-
+    '''
     def _generate_recommendation_reason(
         self,
         user_query: str,
