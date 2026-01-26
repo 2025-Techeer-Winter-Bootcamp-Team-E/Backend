@@ -17,6 +17,7 @@ from .serializers import (
     ProductPriceTrendSerializer,
     MallInformationSerializer,
     MallInformationCreateSerializer,
+    MallPriceSerializer,
     ReviewListResponseSerializer,
     ProductListItemSerializer,
     ProductSearchResponseSerializer,
@@ -248,12 +249,13 @@ class ProductMallInfoView(APIView):
         return [IsAdminUser()]
 
     @extend_schema(
-        responses={200: MallInformationSerializer(many=True)},
+        responses={200: MallPriceSerializer(many=True)},
         summary="Get mall information for a product",
     )
     def get(self, request, product_code: str):
         mall_info = mall_info_service.get_mall_info_by_code(product_code)
-        serializer = MallInformationSerializer(mall_info, many=True)
+        # 프론트엔드가 기대하는 형식: { mall_name, price, url }
+        serializer = MallPriceSerializer(mall_info, many=True)
         return Response({
             'status': 200,
             'data': serializer.data
