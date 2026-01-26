@@ -4,7 +4,10 @@ LLM prompt templates for product recommendation search.
 from modules.categories.models import CategoryModel # CategoryModel import
 # 의도 추출용 프롬프트 - JSON 출력
 # 의도 추출용 프롬프트 - 카테고리 리스트 주입 추가
-INTENT_EXTRACTION_PROMPT = """당신은 쇼핑 검색 의도 분석 전문가입니다. 사용자의 입력(Query)을 분석하여 검색 의도를 구조화된 JSON으로 추출하세요.
+# modules/search/services/prompts.py
+
+INTENT_EXTRACTION_PROMPT = """당신은 하드웨어 및 디지털 기기 쇼핑 전문가입니다. 
+사용자의 입력(Query)을 분석하여 검색 의도를 구조화된 JSON으로 추출하세요.
 
 [검색 가능한 카테고리 목록]
 {category_list}
@@ -13,19 +16,27 @@ INTENT_EXTRACTION_PROMPT = """당신은 쇼핑 검색 의도 분석 전문가입
 "{user_query}"
 
 [분석 규칙]
-1. product_category: 위 [검색 가능한 카테고리 목록] 중 사용자 의도와 가장 정확히 일치하는 하나를 선택하세요.
-   - 예: "노트북 추천해줘" -> "노트북"
-   - 예: "인텔 CPU" -> "인텔" 또는 "CPU"
-   - 목록에 없는 경우 '기타'를 선택하세요.
-2. keywords: 검색 정확도를 높이기 위한 핵심 키워드를 추출하세요.
-3. search_query: 벡터 검색을 위해 '카테고리 + 핵심 스펙 + 용도' 조합의 자연어 문장을 만드세요.
+1. **엄격한 부품/완제품 구분 (필수)**: 
+   - 사용자가 'CPU', '그래픽카드', 'RAM' 등 PC 부품 키워드를 언급하면 절대 '노트북'이나 '데스크탑' 카테고리를 선택하지 마세요.
+   - 예: "i7 추천해줘" -> 'CPU' 선택 (노트북 X)
+   - 예: "RTX 4060 가격" -> '그래픽카드' 선택 (노트북 X)
+   - 오직 사용자가 "노트북", "그램", "맥북" 등 완제품 명칭을 직접 언급했을 때만 '노트북'을 선택하세요.
+
+2. product_category: 위 [검색 가능한 카테고리 목록] 중 가장 적합한 하나를 선택하세요.
+   - 목록에 정확히 일치하는 단어가 있다면 그 단어를 우선 사용하세요.
+   - 목록에 없는 경우에만 '기타'를 선택하세요.
+
+3. keywords: 검색 정확도를 높이기 위한 핵심 키워드를 추출하세요. (예: 제품명, 핵심 스펙)
+
+4. search_query: 벡터 검색을 위해 '카테고리 + 핵심 스펙 + 용도' 조합의 자연어 문장을 만드세요. 
+   - 부품 검색 시에는 부품의 성능 수치 위주로 작성하세요.
 
 [응답 형식 (JSON)]
 {{
     "product_category": "선택된 카테고리명",
     "keywords": ["키워드1", "키워드2"],
-    "search_query": "벡터 검색용 쿼리 (예: 가벼운 게이밍 노트북 RTX4060)",
-    "user_needs": "사용자 니즈 요약 (예: 영상 편집을 위한 고성능 CPU)",
+    "search_query": "벡터 검색용 쿼리 (예: 영상 편집을 위한 다코어 CPU)",
+    "user_needs": "사용자 니즈 요약 (예: AI 개발 입문용 고성능 프로세서)",
     "analysis_message": "사용자에게 보여줄 공감 메시지 (1문장, 존댓말)"
 }}
 

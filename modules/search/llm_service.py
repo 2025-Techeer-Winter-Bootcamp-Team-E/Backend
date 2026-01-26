@@ -35,21 +35,36 @@ class LLMRecommendationService:
         self._category_list_str = ", ".join(cat_names)
 
     def get_recommendations(self, user_query: str) -> Dict[str, Any]:
-        # 1. 의도 추출 실행
+    # 1. 의도 추출 실행
         intent = self._extract_intent_pro(user_query)
         
         llm_category_name = intent.get('product_category', '기타').strip()
         category_id = None
         
-        # [LOG] LLM이 분석한 의도 출력
+        # [보완] 키워드 기반 카테고리 ID 강제 고정 (CPU와 노트북 혼선 방지)
+        # categories.json의 실제 PK 값을 사용합니다.
+        upper_query = user_query.upper()
+        if "CPU" in upper_query or "프로세서" in upper_query:
+            category_id = 21  # CPU 카테고리 PK
+            llm_category_name = "CPU"
+        elif "그래픽카드" in upper_query or "GPU" in upper_query:
+            category_id = 24  # 그래픽카드 카테고리 PK
+            llm_category_name = "그래픽카드"
+        elif "모니터" in upper_query:
+            category_id = 18  # 모니터 카테고리 PK
+            llm_category_name = "모니터"
+        elif "노트북" in upper_query:
+            category_id = 2   # 노트북 카테고리 PK
+            llm_category_name = "노트북"
+
+        # [LOG] 최종 결정된 카테고리 출력
         logger.info(f"==== [STEP 1] LLM Intent Extraction ====")
         logger.info(f"User Query: {user_query}")
-        logger.info(f"LLM Category: {llm_category_name}")
-        logger.info(f"LLM Search Query: {intent.get('search_query')}")
-        
-        # 2. 카테고리 매핑 로직 로그
-        logger.info(f"==== [STEP 2] Category Mapping ====")
-        if llm_category_name and llm_category_name != '기타':
+        logger.info(f"Fixed/LLM Category: {llm_category_name} (ID: {category_id})")
+
+        # 2. 카테고리 매핑 로직 (위에서 ID가 고정되지 않은 경우에만 실행)
+        if not category_id and llm_category_name and llm_category_name != '기타':
+            logger.info(f"==== [STEP 2] Category Fuzzy Mapping ====")
             # 완전 일치 확인
             exact_match = CategoryModel.objects.filter(
                 name=llm_category_name, 
@@ -58,7 +73,6 @@ class LLMRecommendationService:
             
             if exact_match:
                 category_id = exact_match.id
-                logger.info(f"Result: [EXACT MATCH] '{llm_category_name}' -> ID {category_id}")
             else:
                 # Trigram 유사도 확인
                 best_match = CategoryModel.objects.annotate(
@@ -67,23 +81,19 @@ class LLMRecommendationService:
 
                 if best_match:
                     category_id = best_match.id
-                    logger.info(f"Result: [TRIGRAM MATCH] '{llm_category_name}' -> DB '{best_match.name}' (Sim: {best_match.similarity:.4f}, ID: {category_id})")
-                else:
-                    logger.warning(f"Result: [MATCH FAILED] No category found for '{llm_category_name}'")
 
-        # 3. 최종 검색 범위 로그
+        # 3. 최종 검색 범위 설정 (재귀적으로 하위 카테고리 포함)
+        # CPU(21)를 선택하면 인텔(23), AMD(22)가 자동으로 포함됩니다.
         target_category_ids = self._get_descendant_category_ids(category_id) if category_id else []
         logger.info(f"Final Category IDs for Filter: {target_category_ids}")
         
-        # ... (이후 검색 로직)
-
-        # 4. 병렬 DB 검색 (강력한 category_id__in 필터 적용)
+        # 4. 병렬 DB 검색 (target_category_ids가 비어있지 않으면 강력한 필터링 작동)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             f_vec = executor.submit(self._vector_search, intent.get('search_query', user_query), target_category_ids)
             f_key = executor.submit(self._keyword_search, intent.get('keywords', [user_query]), target_category_ids)
             vector_results, keyword_results = f_vec.result(), f_key.result()
 
-        # 5. 하이브리드 결합
+        # 5. 하이브리드 결합 및 재랭킹 (이후 로직 동일)
         fused_results = self._fuse_results(vector_results, keyword_results)[:8]
 
         if not fused_results:
@@ -92,7 +102,6 @@ class LLMRecommendationService:
                 "recommended_products": []
             }
 
-        # 6. 재랭킹 및 최종 조립
         final_products = self._rerank_with_fallback(user_query, intent, fused_results)
 
         return {
@@ -155,8 +164,9 @@ class LLMRecommendationService:
         mall_map = self._get_mall_map([p.id for p in p_list])
         return [{'product': p, 'mall_info': mall_map.get(p.id), 'score': max(0, 1-(p.distance/2))} for p in p_list]
 
+    # modules/search/services/llm_service.py
+
     def _rerank_with_fallback(self, user_query, intent, fused_results):
-        """상세 스펙을 포함한 재랭킹 및 추천 사유 생성"""
         candidates = []
         for item in fused_results:
             p = item['product']
@@ -173,23 +183,44 @@ class LLMRecommendationService:
         reason_map = {}
         try:
             resp = self.gemini_client.generate_content(prompt)
-            data = json.loads(re.search(r'\{[\s\S]*\}', resp.text).group())
-            for r in data.get('results', []):
-                reason_map[str(r.get('product_code'))] = r.get('recommendation_reason')
-        except:
-            logger.warning("LLM Reranking failed, using fallback reason.")
+            # [수정] 1. 응답 텍스트를 안전하게 가져옴
+            raw_text = resp.text if hasattr(resp, 'text') else str(resp)
+            
+            # [수정] 2. JSON 코드 블록(```json) 및 불필요한 줄바꿈 제거
+            clean_text = re.sub(r'```(?:json)?', '', raw_text).strip()
+            # [수정] 3. 가장 바깥쪽 { } 괄호 안의 내용만 정확히 추출
+            json_match = re.search(r'\{[\s\S]*\}', clean_text)
+            
+            if json_match:
+                data = json.loads(json_match.group())
+                results = data.get('results', [])
+                for r in results:
+                    # [수정] 4. ID 매칭 시 문자열/숫자 차이 방지를 위해 str() 처리
+                    p_code = str(r.get('product_code'))
+                    reason_map[p_code] = r.get('recommendation_reason')
+                
+                logger.info(f"✅ [REASONING] Successfully parsed {len(reason_map)} product reasons.")
+            else:
+                logger.warning(f"⚠️ [PARSING FAILED] No JSON block found in: {raw_text[:100]}...")
+
+        except Exception as e:
+            logger.error(f"❌ [RERANK ERROR] {str(e)}")
 
         final = []
         for item in fused_results[:self.TOP_K]:
             p = item['product']
             p_id = str(p.danawa_product_id)
+            
+            # 매칭된 사유가 있으면 사용, 없으면 Fallback 생성 함수 사용
+            final_reason = reason_map.get(p_id) or self._generate_fallback_reason(p)
+            
             final.append({
                 'product_code': p.danawa_product_id,
                 'name': p.name,
                 'brand': p.brand,
                 'price': p.lowest_price,
                 'thumbnail_url': item['mall_info'].representative_image_url if item['mall_info'] else None,
-                'recommendation_reason': reason_map.get(p_id, self._generate_fallback_reason(p)),
+                'recommendation_reason': final_reason,
                 'specs': p.detail_spec.get('spec', {}) if isinstance(p.detail_spec, dict) else {},
                 'review_count': p.review_count,
                 'review_rating': p.review_rating,
