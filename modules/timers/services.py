@@ -130,6 +130,15 @@ class TimerService:
 
         if target_price is not None:
             timer.target_price = target_price
+            
+            # 목표가가 변경되면 구매 적합도 점수와 가이드 메시지 재계산
+            if timer.predicted_price is not None:
+                suitability_score, guide_message = self._calculate_suitability_and_message(
+                    target_price,
+                    timer.predicted_price
+                )
+                timer.purchase_suitability_score = suitability_score
+                timer.purchase_guide_message = guide_message
 
         if is_notification_enabled is not None:
             timer.is_notification_enabled = is_notification_enabled
@@ -333,27 +342,10 @@ class TimerService:
             # 시간이 지날수록 신뢰도 감소
             confidence = max(0.5, 0.95 - (days_ahead * 0.02))
             
-            # 구매 적합도 점수 계산 (0-100)
-            if predicted_price <= target_price:
-                price_diff = target_price - predicted_price
-                discount_rate = (price_diff / target_price * 100) if target_price > 0 else 0
-                suitability_score = min(100, int(75 + discount_rate * 0.5))
-                
-                if discount_rate > 10:
-                    guide_message = "현재 역대 최저가에 근접한 저점 구간입니다. 구매를 강력 추천합니다."
-                elif discount_rate > 5:
-                    guide_message = "예측 가격이 목표가보다 낮습니다. 구매를 권장합니다."
-                else:
-                    guide_message = "예측 가격이 목표가와 유사합니다. 구매를 고려해볼 수 있습니다."
-            else:
-                price_diff = predicted_price - target_price
-                premium_rate = (price_diff / target_price * 100) if target_price > 0 else 0
-                suitability_score = max(0, int(50 - premium_rate * 0.5))
-                
-                if premium_rate > 10:
-                    guide_message = "예측 가격이 목표가보다 높습니다. 좀 더 기다려보세요."
-                else:
-                    guide_message = "예측 가격이 목표가보다 약간 높습니다. 관찰을 권장합니다."
+            # 구매 적합도 점수 및 메시지 계산 (공통 로직 사용)
+            suitability_score, guide_message = self._calculate_suitability_and_message(
+                target_price, predicted_price
+            )
             
             logger.info(
                 f"XGBoost prediction: target={target_price}, predicted={predicted_price}, "
@@ -392,20 +384,44 @@ class TimerService:
 
         # Days until prediction
         days_ahead = (prediction_date.date() - timezone.now().date()).days
+        days_ahead = max(0, days_ahead)  # 음수 방지
         predicted = int(avg_price * (1 + trend_factor * days_ahead * 0.1))
 
         # Confidence decreases with time
         confidence = max(0.5, 0.95 - (days_ahead * 0.05))
+        confidence = min(1.0, confidence)  # 최대 1.0 제한
 
-        # Calculate purchase suitability score (0-100)
-        if predicted <= target_price:
-            suitability_score = min(100, int(80 + (target_price - predicted) / target_price * 100))
-            guide_message = "예측 가격이 목표가보다 낮습니다. 구매를 권장합니다."
-        else:
-            suitability_score = max(0, int(50 - (predicted - target_price) / target_price * 100))
-            guide_message = "예측 가격이 목표가보다 높습니다. 좀 더 기다려보세요."
+        # 구매 적합도 점수 및 메시지 계산 (공통 로직 사용)
+        suitability_score, guide_message = self._calculate_suitability_and_message(
+            target_price, predicted
+        )
 
         return predicted, confidence, suitability_score, guide_message
+
+    def _calculate_suitability_and_message(self, target_price: int, predicted_price: int) -> tuple[int, str]:
+        """구매 적합도 점수와 가이드 메시지를 계산합니다."""
+        if predicted_price <= target_price:
+            price_diff = target_price - predicted_price
+            discount_rate = (price_diff / target_price * 100) if target_price > 0 else 0
+            suitability_score = min(100, int(75 + discount_rate * 0.5))
+            
+            if discount_rate > 10:
+                guide_message = "현재 역대 최저가에 근접한 저점 구간입니다. 구매를 강력 추천합니다."
+            elif discount_rate > 5:
+                guide_message = "예측 가격이 목표가보다 낮습니다. 구매를 권장합니다."
+            else:
+                guide_message = "예측 가격이 목표가와 유사합니다. 구매를 고려해볼 수 있습니다."
+        else:
+            price_diff = predicted_price - target_price
+            premium_rate = (price_diff / target_price * 100) if target_price > 0 else 0
+            suitability_score = max(0, int(50 - premium_rate * 0.5))
+            
+            if premium_rate > 10:
+                guide_message = "예측 가격이 목표가보다 높습니다. 좀 더 기다려보세요."
+            else:
+                guide_message = "예측 가격이 목표가보다 약간 높습니다. 관찰을 권장합니다."
+        
+        return suitability_score, guide_message
 
 
 class PriceHistoryService:
