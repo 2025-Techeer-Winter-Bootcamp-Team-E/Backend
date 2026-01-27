@@ -68,14 +68,14 @@ class CartService:
     def update_item_quantity(
         self,
         cart_id: int,
-        danawa_product_id: str,
+        cart_item_id: int,
         quantity: int,
     ) -> Optional[CartItemModel]:
-        """Update cart item quantity."""
+        """장바구니 수량을  cart_item_id 기반으로 업데이트함"""
         try:
             cart_item = CartItemModel.objects.get(
                 cart_id=cart_id,
-                product__danawa_product_id=danawa_product_id,
+                id=cart_item_id,
                 deleted_at__isnull=True
             )
             if quantity <= 0:
