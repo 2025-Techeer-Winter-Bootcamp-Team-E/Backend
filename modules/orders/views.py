@@ -8,7 +8,6 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
 from .services import CartService, OrderService, OrderHistoryService, ReviewService
 from .serializers import (
     CartSerializer,
@@ -291,41 +290,88 @@ class CartItemDeleteView(APIView):
         summary="Remove cart item",
         description="장바구니에서 특정 항목 삭제",
     )
-    def delete(self, request, cart_item_id: int): # Changed parameter name and type
+    # def delete(self, request, cart_item_id: int): # Changed parameter name and type
+    #     try:
+    #         # Product existence check is no longer needed here
+            
+    #         # Get the user's cart
+    #         cart = cart_service.get_or_create_cart(request.user.id)
+            
+    #         # Attempt to remove the item using cart_item_id
+    #         removed = cart_service.remove_item(cart.id, cart_item_id)
+            
+    #         if not removed:
+    #             return Response(
+    #                 {
+    #                     'status': 400, # Bad Request if item not found or not in user's cart
+    #                     'message': '잘못된 요청이거나 해당 장바구니 항목을 찾을 수 없습니다.',
+    #                 },
+    #                 status=status.HTTP_400_BAD_REQUEST    
+    #             )
+            
+    #         return Response(
+    #             {
+    #                 'status': 200,
+    #                 'message': '장바구니에서 항목이 삭제되었습니다.',
+    #             },
+    #             status=status.HTTP_200_OK
+    #         )
+    #     except Exception as e:
+    #         logger.error(f"장바구니 항목 삭제 중 서버 오류 발생: {str(e)}", exc_info=True)
+    #         return Response(
+    #             {
+    #                 'status': 500,
+    #                 'message': '서버 내부 오류가 발생했습니다.',
+    #             },
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
+    @extend_schema(
+        summary="장바구니 항목 수정 및 삭제",
+        description="quantity가 0보다 크면 수량을 수정하고, 0이면 항목을 삭제합니다.",
+        request=CartItemUpdateSerializer,
+    )
+    def patch(self, request, cart_item_id: int):
         try:
-            # Product existence check is no longer needed here
-            
-            # Get the user's cart
+            # 1. 수량 데이터 가져오기 (시리얼라이저 혹은 request.data)
+            serializer = CartItemUpdateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            quantity = serializer.validated_data['quantity']
+
             cart = cart_service.get_or_create_cart(request.user.id)
-            
-            # Attempt to remove the item using cart_item_id
-            removed = cart_service.remove_item(cart.id, cart_item_id)
-            
-            if not removed:
-                return Response(
-                    {
-                        'status': 400, # Bad Request if item not found or not in user's cart
-                        'message': '잘못된 요청이거나 해당 장바구니 항목을 찾을 수 없습니다.',
-                    },
-                    status=status.HTTP_400_BAD_REQUEST    
-                )
-            
-            return Response(
-                {
-                    'status': 200,
-                    'message': '장바구니에서 항목이 삭제되었습니다.',
-                },
-                status=status.HTTP_200_OK
+
+            # 2. 서비스 호출
+            updated_item = cart_service.update_item_quantity(
+                cart_id=cart.id,
+                cart_item_id=cart_item_id,
+                quantity=quantity
             )
-        except Exception as e:
-            logger.error(f"장바구니 항목 삭제 중 서버 오류 발생: {str(e)}", exc_info=True)
-            return Response(
-                {
-                    'status': 500,
-                    'message': '서버 내부 오류가 발생했습니다.',
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+
+            # 3. [핵심] 결과가 없으면(False/None) 400 에러 처리
+            if not updated_item:
+                # 만약 수량이 0이라서 삭제된 경우라면 (서비스 로직상 None 반환)
+                if quantity <= 0:
+                    return Response({
+                        "status": 200,
+                        "message": "장바구니 항목이 삭제되었습니다." 
+                    }, status=status.HTTP_200_OK)
+                
+                # 그 외에 항목을 못 찾았거나 본인 것이 아닌 경우
+                return Response({
+                    "status": 400,
+                    "message": "잘못된 요청이거나 본인의 장바구니 항목이 아닙니다." 
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # 4. 성공 시 응답
+            return Response({
+                "status": 200,
+                "message": "장바구니 수량이 변경되었습니다."
+            }, status=status.HTTP_200_OK)
+
+        except Exception:
+            return Response({
+                "status": 500,
+                "message": "서버 내부 오류가 발생했습니다." 
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @extend_schema(tags=['Orders'])
