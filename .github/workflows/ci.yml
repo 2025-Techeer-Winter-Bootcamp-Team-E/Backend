@@ -73,7 +73,7 @@ jobs:
           context: .               # Dockerfile이 있는 위치 (현재 폴더)
           push: true               # 빌드 완료 후 도커 허브로 전송 여부
           tags: |
-            # 1. 버전 숫자가 붙은 이미지 (예: techeer/backend:1.1.15)
             ${{ secrets.DOCKER_HUB_USERNAME }}/backend:${{ steps.set_tag.outputs.DOCKER_IMAGE_TAG }}
-            # 2. 언제나 최신임을 나타내는 latest 이미지 (예: techeer/backend:latest)
-            ${{ secrets.DOCKER_HUB_USERNAME }}/backend:latest
+            ${{ secrets.DOCKER_HUB_USERNAME }}/backend:latest 
+          # 1. 버전 숫자가 붙은 이미지 (예: techeer/backend:1.1.15)
+          # 2. 언제나 최신임을 나타내는 latest 이미지 (예: techeer/backend:latest)
