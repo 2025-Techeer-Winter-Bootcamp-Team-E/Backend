@@ -31,8 +31,22 @@ class LLMRecommendationService:
         self.gemini_client = get_gemini_client()
         
         # 프롬프트 힌트용 카테고리 명칭 로드
-        cat_names = CategoryModel.objects.filter(deleted_at__isnull=True).values_list('name', flat=True)
-        self._category_list_str = ", ".join(cat_names)
+        self._category_list_str = None
+
+
+    @property
+    def _category_list_str(self):
+        if self._category_list_str is None:
+            try:
+                cat_names = CategoryModel.objects.filter(deleted_at__isnull=True).values_list('name', flat=True)
+                self._category_list_str = ", ".join(cat_names) if cat_names else "정보 없음"
+            except Exception as e:
+                # 테이블이 없는 초기 배포 상태일 때 에러 방지
+                logger.warning(f"Category load failed (likely migration pending): {e}")
+                return "정보 없음"
+        return self._category_list_str
+
+
 
     def get_recommendations(self, user_query: str) -> Dict[str, Any]:
     # 1. 의도 추출 실행
@@ -118,6 +132,7 @@ class LLMRecommendationService:
         return ids
 
     def _extract_intent_pro(self, user_query: str) -> Dict[str, Any]:
+        # self._category_list_str 대신 self.category_list_str (프로퍼티) 호출
         """LLM의 날것(Raw) 그대로의 답변을 로깅합니다."""
         full_prompt = INTENT_EXTRACTION_PROMPT.format(
             category_list=self._category_list_str, 
