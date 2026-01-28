@@ -75,3 +75,10 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_HUB_USERNAME }}/backend:${{ steps.set_tag.outputs.DOCKER_IMAGE_TAG }}
             ${{ secrets.DOCKER_HUB_USERNAME }}/backend:latest 
+      
+      - name: Trigger Deployment
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GH_PAT }} # Personal Access Token이 필요합니다.
+          repository: 2025-Techeer-Winter-Bootcamp-Team-E/Backend_deploy # 배포 레포 이름
+          event-type: trigger-deploy
