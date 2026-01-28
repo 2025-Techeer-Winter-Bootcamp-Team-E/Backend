@@ -69,7 +69,7 @@ WARNING: Survey analysis failed: 400 API key not valid. Please pass a valid API 
    GEMINI_API_KEY=your-gemini-api-key
    
    # ✅ 올바른 예시
-   GEMINI_API_KEY=AIzaSyC81I_z9fdoVqg2IhFTkhuNjivXZhelFrI
+   GEMINI_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
    ```
 
 2. **Docker 컨테이너 재시작** (위와 동일)

@@ -80,10 +80,10 @@ docker-compose exec backend python manage.py createsuperuser
 | Admin | http://localhost:8000/admin | Django Admin |
 | Metrics | http://localhost:8000/metrics | Prometheus 메트릭 엔드포인트 |
 | Flower | http://localhost:5555 | Celery 모니터링 |
-| RabbitMQ | http://localhost:15672 | RabbitMQ 관리 (admin/admin123) |
+| RabbitMQ | http://localhost:15672 | RabbitMQ 관리 (.env 참조) |
 | Prometheus | http://localhost:9090 | 메트릭 수집 및 저장 |
-| Grafana | http://localhost:3000 | 모니터링 대시보드 (admin/admin123) |
-| MinIO | http://localhost:9001 | 파일 스토리지 (minioadmin/minioadmin) |
+| Grafana | http://localhost:3000 | 모니터링 대시보드 (.env 참조) |
+| MinIO | http://localhost:9001 | 파일 스토리지 (.env 참조) |
 
 ## 자주 사용하는 명령어
 

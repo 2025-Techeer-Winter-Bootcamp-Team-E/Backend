@@ -704,11 +704,11 @@ docker-compose exec backend python manage.py createsuperuser
 | Swagger UI | http://localhost:8000/api/docs/ | - |
 | ReDoc | http://localhost:8000/api/redoc/ | - |
 | Admin | http://localhost:8000/admin/ | 슈퍼유저 |
-| RabbitMQ | http://localhost:15672 | admin / admin123 |
-| MinIO | http://localhost:9001 | minioadmin / minioadmin |
+| RabbitMQ | http://localhost:15672 | .env 파일 참조 |
+| MinIO | http://localhost:9001 | .env 파일 참조 |
 | Flower | http://localhost:5555 | - |
 | Prometheus | http://localhost:9090 | - |
-| Grafana | http://localhost:3000 | admin / admin123 |
+| Grafana | http://localhost:3000 | .env 파일 참조 |
 
 ---
 

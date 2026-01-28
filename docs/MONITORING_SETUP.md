@@ -31,7 +31,7 @@ Grafana (시각화 및 대시보드)
 - **역할**: 메트릭 시각화 및 대시보드
 - **포트**: 3000
 - **URL**: http://localhost:3000
-- **기본 로그인**: admin / admin123
+- **기본 로그인**: .env 파일 참조
 - **설정 경로**: `Backend/monitoring/grafana/provisioning/`
 
 ---
@@ -79,9 +79,7 @@ curl http://localhost:9090/api/v1/targets
 # Grafana UI 접속
 open http://localhost:3000
 
-# 로그인
-# Username: admin
-# Password: admin123
+# 로그인 - .env 파일의 GRAFANA_USER, GRAFANA_PASSWORD 참조
 ```
 
 ### 3. Django 메트릭 확인
@@ -309,7 +307,7 @@ groups:
 | 서비스 | URL | 기본 인증 |
 |--------|-----|----------|
 | Prometheus | http://localhost:9090 | 없음 |
-| Grafana | http://localhost:3000 | admin / admin123 |
+| Grafana | http://localhost:3000 | .env 파일 참조 |
 | Django Metrics | http://localhost:8000/metrics | 없음 |
 
 ---

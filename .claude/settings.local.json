@@ -47,7 +47,16 @@
       "Bash(DJANGO_SETTINGS_MODULE=config.settings.dev python:*)",
       "Bash(DJANGO_SETTINGS_MODULE=config.settings.prod python3 -c \"\nimport django\ndjango.setup\\(\\)\nfrom modules.products.models import ProductAIReviewAnalysisModel\nanalyses = ProductAIReviewAnalysisModel.objects.filter\\(deleted_at__isnull=True\\)[:5]\nfor a in analyses:\n    print\\(f''product_code: {a.product.danawa_product_id}''\\)\nif not list\\(analyses\\):\n    print\\(''AI 분석 데이터가 없습니다.''\\)\n\")",
       "Bash(psql:*)",
-      "Bash(killall:*)"
+      "Bash(killall:*)",
+      "Bash(grep:*)",
+      "Bash(git -C /Users/chosunghoon/Desktop/GitHub/Techeerbootcamp_E/Backend/Backend log --all --oneline --source -- .env)",
+      "Bash(git -C /Users/chosunghoon/Desktop/GitHub/Techeerbootcamp_E/Backend/Backend log --all --oneline --source -- *.sql)",
+      "Bash(git -C /Users/chosunghoon/Desktop/GitHub/Techeerbootcamp_E/Backend/Backend show:*)",
+      "Bash(git -C /Users/chosunghoon/Desktop/GitHub/Techeerbootcamp_E/Backend/Backend log --all --oneline -- \"backup_20260128_033809.sql\")",
+      "Bash(git -C /Users/chosunghoon/Desktop/GitHub/Techeerbootcamp_E/Backend/Backend log --all --oneline -- \"project_backup.dump\")",
+      "Bash(git -C /Users/chosunghoon/Desktop/GitHub/Techeerbootcamp_E/Backend/Backend log --all --oneline -- \"Dockerfile\")",
+      "Bash(git -C /Users/chosunghoon/Desktop/GitHub/Techeerbootcamp_E/Backend/Backend remote:*)",
+      "Bash(git log:*)"
     ]
   }
 }
