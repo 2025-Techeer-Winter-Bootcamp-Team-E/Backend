@@ -30,21 +30,21 @@ class LLMRecommendationService:
         self.openai_client = get_openai_client()
         self.gemini_client = get_gemini_client()
         
-        # 프롬프트 힌트용 카테고리 명칭 로드
-        self._category_list_str = None
+        # 프롬프트 힌트용 카테고리 명칭 로드 (프로퍼티와 이름 충돌 방지)
+        self._cached_category_list_str = None
 
 
     @property
     def _category_list_str(self):
-        if self._category_list_str is None:
+        if self._cached_category_list_str is None:
             try:
                 cat_names = CategoryModel.objects.filter(deleted_at__isnull=True).values_list('name', flat=True)
-                self._category_list_str = ", ".join(cat_names) if cat_names else "정보 없음"
+                self._cached_category_list_str = ", ".join(cat_names) if cat_names else "정보 없음"
             except Exception as e:
                 # 테이블이 없는 초기 배포 상태일 때 에러 방지
                 logger.warning(f"Category load failed (likely migration pending): {e}")
                 return "정보 없음"
-        return self._category_list_str
+        return self._cached_category_list_str
 
 
 
