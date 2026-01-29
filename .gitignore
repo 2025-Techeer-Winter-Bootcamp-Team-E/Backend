@@ -152,4 +152,8 @@ logs/
 secrets/
 
 # Data
-*.sql 
+*.sql
+
+# Documentation (excluded from git)
+docs/AI_SHOPPING_INTELLIGENCE.md
+docs/AI_SHOPPING_RESEARCH.md 
