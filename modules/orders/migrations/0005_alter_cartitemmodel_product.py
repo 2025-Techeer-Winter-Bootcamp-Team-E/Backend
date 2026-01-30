@@ -31,3 +31,4 @@ class Migration(migrations.Migration):
             database_operations=[],  # No DB changes - 0004 already handled it
         ),
     ]
+ 
