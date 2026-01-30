@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse # OpenApiResponse 추가
 
 logger = logging.getLogger(__name__)
-
+ 
 from .services import SearchService, RecentViewProductService
 from .llm_service import LLMRecommendationService
 from .shopping_research_service import ShoppingResearchService
