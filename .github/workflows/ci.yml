@@ -81,4 +81,4 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }} # Personal Access Token이 필요합니다.
           repository: 2025-Techeer-Winter-Bootcamp-Team-E/Backend_deploy # 배포 레포 이름
-          event-type: trigger-deploy  
+          event-type: trigger-deploy
