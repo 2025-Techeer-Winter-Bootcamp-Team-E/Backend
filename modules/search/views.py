@@ -23,7 +23,7 @@ from .serializers import (
     RecentViewProductCreateSerializer,
     AutocompleteResponseSerializer,
     PopularTermsResponseSerializer,
-    RecentSearchSerializer,
+    RecentSearchSerializer, 
     RecentSearchResponseSerializer,
     LLMRecommendationRequestSerializer,
     LLMRecommendationResponseSerializer,
